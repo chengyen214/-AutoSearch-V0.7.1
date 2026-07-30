@@ -8,6 +8,7 @@ RSS搜尋模組
 2. Google News URL解碼
 3. URL去重
 4. 數量限制
+5. 回傳 Article 資料模型
 """
 
 
@@ -16,6 +17,10 @@ import feedparser
 from urllib.parse import quote
 
 from googlenewsdecoder import gnewsdecoder
+
+from models.article import Article
+
+
 
 
 
@@ -66,16 +71,21 @@ def search(keyword, max_results=10):
     搜尋新聞
 
     input:
+
         keyword:
             搜尋關鍵字
+
 
         max_results:
             最大文章數
 
 
     output:
-        list
+
+        list[Article]
+
     """
+
 
 
     print()
@@ -90,11 +100,17 @@ def search(keyword, max_results=10):
 
 
 
+
+
     # URL encode
 
     keyword_encode = quote(
+
         keyword
+
     )
+
+
 
 
 
@@ -114,6 +130,8 @@ def search(keyword, max_results=10):
 
 
 
+
+
     feed = feedparser.parse(
 
         rss_url
@@ -122,7 +140,10 @@ def search(keyword, max_results=10):
 
 
 
+
+
     results = []
+
 
 
     # 本次搜尋去重
@@ -131,13 +152,19 @@ def search(keyword, max_results=10):
 
 
 
+
+
     for item in feed.entries:
+
+
 
 
 
         if len(results) >= max_results:
 
             break
+
+
 
 
 
@@ -151,6 +178,8 @@ def search(keyword, max_results=10):
 
 
 
+
+
         url = item.get(
 
             "link",
@@ -158,6 +187,8 @@ def search(keyword, max_results=10):
             ""
 
         )
+
+
 
 
 
@@ -171,7 +202,11 @@ def search(keyword, max_results=10):
 
 
 
+
+
         source = ""
+
+
 
 
 
@@ -193,15 +228,23 @@ def search(keyword, max_results=10):
 
 
 
+
+
+
+
         # =========================
         # Google News URL解碼
         # =========================
+
 
         url = resolve_google_news_url(
 
             url
 
         )
+
+
+
 
 
         print(
@@ -214,11 +257,18 @@ def search(keyword, max_results=10):
 
 
 
+
+
+
+
         # URL去重
+
 
         if url in url_set:
 
             continue
+
+
 
 
 
@@ -230,34 +280,33 @@ def search(keyword, max_results=10):
 
 
 
-        article = {
 
 
-            "keyword":
-
-                keyword,
 
 
-            "title":
-
-                title,
-
-
-            "url":
-
-                url,
+        # =========================
+        # P5
+        # RSS資料轉 Article
+        # =========================
 
 
-            "published":
+        article = Article(
 
-                published,
+            keyword=keyword,
+
+            title=title,
+
+            url=url,
+
+            published=published,
+
+            source=source
+
+        )
 
 
-            "source":
 
-                source
 
-        }
 
 
 
@@ -269,6 +318,10 @@ def search(keyword, max_results=10):
 
 
 
+
+
+
+
     print()
 
     print(
@@ -276,9 +329,12 @@ def search(keyword, max_results=10):
     )
 
 
+
     print(
         f"取得文章：{len(results)}"
     )
+
+
 
 
 

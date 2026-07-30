@@ -13,6 +13,7 @@ Article 資料模型
 
 class Article:
 
+
     def __init__(
         self,
         keyword="",
@@ -22,48 +23,68 @@ class Article:
         source="",
         content="",
         crawl_time="",
-        status="Success"
+        status="Success",
+        document_id="",
+        error=""
     ):
 
-        # 搜尋關鍵字
+
         self.keyword = keyword
 
-        # 文章標題
         self.title = title
 
-        # 文章網址
         self.url = url
 
-        # 發布日期
         self.published = published
 
-        # 網站來源
         self.source = source
 
-        # 文章內容
         self.content = content
 
-        # 抓取時間
         self.crawl_time = crawl_time
 
-        # 抓取狀態
         self.status = status
 
-    def to_dict(self):
-        """
-        轉成 Dictionary
+        # P5 Document ID
+        self.document_id = document_id
 
-        Excel、MySQL
-        都可以直接使用。
-        """
+        # 錯誤紀錄
+        self.error = error
+
+
+
+    def to_dict(self):
 
         return {
-            "keyword": self.keyword,
-            "title": self.title,
-            "url": self.url,
-            "published": self.published,
-            "source": self.source,
-            "content": self.content,
-            "crawl_time": self.crawl_time,
-            "status": self.status
+
+            "keyword":
+                self.keyword,
+
+            "title":
+                self.title,
+
+            "url":
+                self.url,
+
+            "published":
+                self.published,
+
+            "source":
+                self.source,
+
+            "content":
+                self.content,
+
+            "crawl_time":
+                self.crawl_time,
+
+            "status":
+                self.status,
+
+            "document_id":
+                self.document_id,
+
+            "error":
+                self.error
+
         }

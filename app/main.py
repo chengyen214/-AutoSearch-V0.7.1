@@ -21,21 +21,17 @@ app/main.py
 
 版本：
 
-    V2.0
+    V2.1 P5
 """
+
 
 
 # ======================================
 # 匯入設定
 # ======================================
 
-
-# 搜尋關鍵字
-
 from config.keywords import SEARCH_KEYWORDS
 
-
-# 系統設定
 
 from config.settings import (
     MAX_RESULTS,
@@ -49,76 +45,65 @@ from config.settings import (
 # ======================================
 
 
-# 搜尋功能
-
 from search.search_engine import search
 
-
-# 網頁下載功能
 
 from crawler.crawler import download
 
 
-# HTML解析功能
-
 from parser.parser import parse
 
 
-# Excel輸出功能
-
 from exporter.excel import export
 
+from utils.hash import generate_hash
 
+from utils.duplicate import (
+    is_duplicate,
+    save_document
+)
 
+from utils.history import save_history
 
 
 def main():
+
     """
     AutoSearch_V2 主流程
 
 
     流程：
 
-    關鍵字
+    Keyword
 
         ↓
 
-    搜尋文章
+    Search
 
         ↓
 
-    取得網址
+    Article
 
         ↓
 
-    下載HTML
+    Download HTML
 
         ↓
 
-    解析內容
+    Parser
 
         ↓
 
-    Article物件
+    Cleaner
 
         ↓
 
-    Excel輸出
-
-
-    Returns
-    -------
-
-    None
+    Export Excel
     """
 
 
 
-    # ==================================
-    # 建立文章列表
-    #
-    # 用來保存所有Article物件
-    # ==================================
+    # 保存所有 Article
 
     articles = []
 
@@ -126,16 +111,10 @@ def main():
 
     # ==================================
     # 逐一搜尋關鍵字
-    #
-    # 例如：
-    #
-    # IC semiconductor
-    # SerDes
-    # HBM
-    #
     # ==================================
 
     for keyword in SEARCH_KEYWORDS:
+
 
 
         print()
@@ -151,45 +130,49 @@ def main():
 
 
         # ==================================
-        # 搜尋文章
+        # 搜尋
         #
-        # 回傳：
+        # 回傳:
         #
-        # [
-        #   {
-        #       title:"",
-        #       url:"",
-        #       published:""
-        #   }
-        # ]
+        # list[Article]
         #
         # ==================================
 
         search_results = search(
+
             keyword,
+
             MAX_RESULTS
+
         )
 
+        new_count = 0
+
+        duplicate_count = 0
+        
+        failed_count = 0
 
 
         # ==================================
-        # 逐篇處理搜尋結果
+        # 處理每篇文章
         # ==================================
 
         for item in search_results:
 
 
+
             print(
                 "處理文章：",
-                item["title"]
+                item.title
             )
 
 
+
             # ------------------------------
-            # 取得文章網址
+            # 取得網址
             # ------------------------------
 
-            url = item["url"]
+            url = item.url
 
 
 
@@ -198,85 +181,142 @@ def main():
             # ------------------------------
 
             html = download(
+
                 url,
+
                 HEADERS
+
             )
 
 
 
             # ------------------------------
-            # 下載失敗跳過
+            # 下載失敗
             # ------------------------------
 
             if html is None:
+
+
+                item.status = "Failed"
+
+                item.error = "Download failed"
+                failed_count += 1
+
+                articles.append(
+
+                    item
+
+                )
+
 
                 continue
 
 
 
             # ------------------------------
-            # 解析HTML
+            # HTML解析
             #
-            # 回傳：
-            #
-            # Article物件
+            # 回傳 Article
             #
             # ------------------------------
 
             article = parse(
+
                 html,
+
                 keyword
+
             )
+            
+            article.document_id = generate_hash(
+                article.title,
+                article.content
+            )   
+            
+            if is_duplicate(
+                article.document_id
+            ):
+
+                print(
+                    "重複資料，跳過：",
+                    article.title
+                )
+                
+                duplicate_count += 1
+
+                continue
 
 
 
-            # ------------------------------
-            # 補充搜尋結果資料
-            #
-            # Article是class物件
-            #
-            # 使用：
-            #
-            # article.url
-            #
-            # 不是：
-            #
-            # article["url"]
-            #
-            # ------------------------------
-
-            article.url = url
-
-
-
-            # 搜尋結果有日期
-            # 補入Article
-
-            article.published = item.get(
-                "published",
-                ""
+            save_document(
+                article.document_id
             )
+            
+            new_count += 1
+
+
+            # ------------------------------
+            # 保留搜尋資料
+            #
+            # 因 parser 不一定知道
+            # Google News資料
+            #
+            # ------------------------------
+
+            article.keyword = item.keyword
+
+
+            article.title = item.title
+
+
+            article.url = item.url
+
+
+            article.published = item.published
+
+
+            article.source = item.source
+
+
+
+            article.status = "Success"
 
 
 
             # ------------------------------
-            # 加入文章列表
+            # 加入結果
             # ------------------------------
 
             articles.append(
-                article
-            )
 
+                article
+
+            )
+        
+        
+        save_history(
+
+            keyword,
+
+            len(search_results),
+
+            new_count,
+
+            duplicate_count,
+            
+            failed_count
+
+        )
 
 
     # ======================================
-    # 全部搜尋完成
-    #
-    # 輸出Excel
+    # Excel輸出
     # ======================================
 
     export(
+
         articles
+
     )
 
 
@@ -289,8 +329,10 @@ def main():
 
 
 
+
+
 # ======================================
-# 測試入口
+# 程式入口
 # ======================================
 
 if __name__ == "__main__":

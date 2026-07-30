@@ -3,7 +3,7 @@ AutoSearch 系統設定
 """
 
 # 搜尋設定
-MAX_RESULTS = 10
+MAX_RESULTS = 5
 
 # 網頁下載
 TIMEOUT = 15

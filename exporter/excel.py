@@ -2,43 +2,33 @@
 excel.py
 
 功能：
-    將搜尋結果輸出成 Excel。
+    將 Article 資料新增到 Excel。
 
-輸入：
-    Article資料列表
+P5:
+    1. Excel欄位固定
+    2. 歷史資料保留
+    3. document_id去重
 
 輸出：
     output/result.xlsx
-
-版本：
-    V2.0
 """
 
 
+import os
 import pandas as pd
 
 from config.settings import OUTPUT_FILE
-import os
+
 
 
 def export(articles):
     """
-    輸出Excel檔案
+    Article列表輸出Excel
 
-    Parameters
-    ----------
-    articles:
-        Article物件列表
-
-    Returns
-    -------
-    None
+    新資料追加，
+    不覆蓋舊資料。
     """
 
-
-    # ----------------------------
-    # 檢查是否有資料
-    # ----------------------------
 
     if not articles:
 
@@ -49,15 +39,11 @@ def export(articles):
 
 
     # ----------------------------
-    # 建立Excel資料列表
+    # Article -> dict
     # ----------------------------
 
     data = []
 
-
-    # ----------------------------
-    # Article物件轉成dictionary
-    # ----------------------------
 
     for article in articles:
 
@@ -66,28 +52,90 @@ def export(articles):
         )
 
 
+    new_df = pd.DataFrame(data)
+
+
 
     # ----------------------------
-    # 建立Pandas表格
+    # 建立資料夾
     # ----------------------------
 
-    df = pd.DataFrame(data)
-# 自動建立輸出資料夾
-    folder = os.path.dirname(OUTPUT_FILE)
+    folder = os.path.dirname(
+        OUTPUT_FILE
+    )
+
 
     if folder:
+
         os.makedirs(
             folder,
             exist_ok=True
         )
 
 
+
     # ----------------------------
-    # 輸出Excel
+    # Excel已存在
+    # ----------------------------
+
+    if os.path.exists(
+        OUTPUT_FILE
+    ):
+
+
+        old_df = pd.read_excel(
+            OUTPUT_FILE
+        )
+
+
+        # 新舊資料合併
+
+        df = pd.concat(
+
+            [
+                old_df,
+                new_df
+            ],
+
+            ignore_index=True
+
+        )
+
+
+        # ------------------------
+        # P5 Duplicate
+        # document_id去重
+        # ------------------------
+
+        if "document_id" in df.columns:
+
+
+            df.drop_duplicates(
+
+                subset=[
+                    "document_id"
+                ],
+
+                keep="first",
+
+                inplace=True
+
+            )
+
+
+    else:
+
+
+        df = new_df
+
+
+
+    # ----------------------------
+    # 輸出
     # ----------------------------
 
     df.to_excel(
-        
+
         OUTPUT_FILE,
 
         index=False
@@ -95,8 +143,7 @@ def export(articles):
     )
 
 
-
     print(
-        "Excel輸出完成：",
+        "Excel更新完成：",
         OUTPUT_FILE
     )
