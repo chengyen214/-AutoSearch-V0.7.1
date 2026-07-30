@@ -1,0 +1,24 @@
+# ======================================
+# AutoSearch_V2
+# Python 套件需求
+# ======================================
+
+# HTTP 請求
+requests
+
+# HTML解析
+beautifulsoup4
+
+# HTML parser
+lxml
+
+# RSS新聞解析
+feedparser
+
+# 資料處理
+pandas
+
+# Excel輸出
+openpyxl
+
+googlenewsdecoder
