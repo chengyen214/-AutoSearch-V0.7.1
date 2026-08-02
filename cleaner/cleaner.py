@@ -36,10 +36,8 @@ def clean_text(text):
     # 多個空白、換行變成一個空白
     text = re.sub(
 
-        r"\s+",
-
+        r"[ \t]+",
         " ",
-
         text
 
     )
