@@ -1,7 +1,7 @@
 [
     {
         "keyword": "IC semiconductor",
-        "time": "2026-08-02 14:13:42",
+        "time": "2026-08-03 08:45:50",
         "total_results": 5,
         "new_documents": 4,
         "duplicate_documents": 0,
@@ -9,10 +9,10 @@
     },
     {
         "keyword": "IC semiconductor",
-        "time": "2026-08-02 14:29:29",
+        "time": "2026-08-03 10:45:55",
         "total_results": 5,
-        "new_documents": 1,
-        "duplicate_documents": 3,
+        "new_documents": 0,
+        "duplicate_documents": 4,
         "failed_documents": 1
     }
 ]

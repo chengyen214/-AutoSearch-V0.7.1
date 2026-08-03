@@ -22,3 +22,11 @@ pandas
 openpyxl
 
 googlenewsdecoder
+
+mysql-connector-python
+
+fastapi
+
+uvicorn
+
+pytest

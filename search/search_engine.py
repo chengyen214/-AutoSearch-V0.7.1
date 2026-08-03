@@ -23,7 +23,6 @@ from models.article import Article
 
 
 
-
 def resolve_google_news_url(url):
     """
     Google News URL解碼

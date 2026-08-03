@@ -21,7 +21,7 @@ app/main.py
 
 版本：
 
-    V2.1 P5
+    V2.5 P4
 """
 
 
@@ -31,12 +31,14 @@ app/main.py
 # ======================================
 
 from config.keywords import SEARCH_KEYWORDS
-
+from database.article_repository import ArticleRepository
 
 from config.settings import (
     MAX_RESULTS,
     HEADERS
 )
+from utils.logger import logger
+
 
 
 
@@ -107,7 +109,7 @@ def main():
 
     articles = []
 
-
+    repo = ArticleRepository()
 
     # ==================================
     # 逐一搜尋關鍵字
@@ -121,7 +123,7 @@ def main():
 
         print("=" * 50)
 
-        print(
+        logger.info(
             f"開始搜尋：{keyword}"
         )
 
@@ -228,6 +230,7 @@ def main():
 
             )
             
+            
             article.document_id = generate_hash(
                 article.title,
                 article.content
@@ -292,6 +295,23 @@ def main():
                 article
 
             )
+            try:
+
+                result = repo.save(article)
+
+                print(
+                    "Database Save:",
+                    result,
+                    article.title
+                )
+
+            except Exception as e:
+
+                logger.error(
+                    f"Database Error: {e}"
+                )
+
+                raise
         
         
         save_history(
