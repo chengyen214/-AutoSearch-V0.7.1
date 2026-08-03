@@ -1,49 +1,103 @@
 """
 app/main.py
 
-功能：
+AutoSearch_V3
 
-    AutoSearch_V2 主流程控制。
+P4.3
 
-
-負責：
-
-    1. 讀取搜尋關鍵字
-
-    2. 呼叫搜尋模組
-
-    3. 下載文章HTML
-
-    4. 解析文章內容
-
-    5. 輸出Excel
+主流程控制
 
 
-版本：
+Pipeline:
 
-    V2.5 P4
+Keyword
+
+↓
+
+Search
+
+↓
+
+Download HTML
+
+↓
+
+Parser
+
+↓
+
+Article
+
+↓
+
+AI Analyzer
+
+↓
+
+AIAnalysis
+
+↓
+
+MySQL
+
+↓
+
+Excel
+
 """
 
 
 
 # ======================================
-# 匯入設定
+# Config
 # ======================================
 
+
 from config.keywords import SEARCH_KEYWORDS
-from database.article_repository import ArticleRepository
+
 
 from config.settings import (
     MAX_RESULTS,
     HEADERS
 )
-from utils.logger import logger
 
 
 
 
 # ======================================
-# 匯入功能模組
+# Database
+# ======================================
+
+
+from database.article_repository import (
+    ArticleRepository
+)
+
+
+
+
+
+# ======================================
+# AI
+# ======================================
+
+
+from ai.analyzer import (
+    AIAnalyzer
+)
+
+
+from models.ai_analysis import (
+    AIAnalysis
+)
+
+
+
+
+
+
+# ======================================
+# Core Modules
 # ======================================
 
 
@@ -58,303 +112,529 @@ from parser.parser import parse
 
 from exporter.excel import export
 
-from utils.hash import generate_hash
+
+
+
+
+
+
+# ======================================
+# Utils
+# ======================================
+
+
+from utils.hash import (
+    generate_hash
+)
+
 
 from utils.duplicate import (
     is_duplicate,
     save_document
 )
 
-from utils.history import save_history
+
+from utils.history import (
+    save_history
+)
+
+
+from utils.logger import logger
+
+
+
+
+
+
+
+
 
 
 def main():
 
-    """
-    AutoSearch_V2 主流程
 
 
-    流程：
-
-    Keyword
-
-        ↓
-
-    Search
-
-        ↓
-
-    Article
-
-        ↓
-
-    Download HTML
-
-        ↓
-
-    Parser
-
-        ↓
-
-    Cleaner
-
-        ↓
-
-    Export Excel
-    """
+    logger.info(
+        "========== AutoSearch V3 Start =========="
+    )
 
 
-
-    # 保存所有 Article
 
     articles = []
 
+
+
     repo = ArticleRepository()
 
-    # ==================================
-    # 逐一搜尋關鍵字
-    # ==================================
 
-    for keyword in SEARCH_KEYWORDS:
+
+    ai_analyzer = AIAnalyzer()
 
 
 
-        print()
 
-        print("=" * 50)
 
-        logger.info(
-            f"開始搜尋：{keyword}"
-        )
 
-        print("=" * 50)
+
+    try:
 
 
 
         # ==================================
-        # 搜尋
-        #
-        # 回傳:
-        #
-        # list[Article]
-        #
+        # Keyword Loop
         # ==================================
 
-        search_results = search(
 
-            keyword,
-
-            MAX_RESULTS
-
-        )
-
-        new_count = 0
-
-        duplicate_count = 0
-        
-        failed_count = 0
-
-
-        # ==================================
-        # 處理每篇文章
-        # ==================================
-
-        for item in search_results:
+        for keyword in SEARCH_KEYWORDS:
 
 
 
-            print(
-                "處理文章：",
-                item.title
-            )
+            logger.info(
 
-
-
-            # ------------------------------
-            # 取得網址
-            # ------------------------------
-
-            url = item.url
-
-
-
-            # ------------------------------
-            # 下載HTML
-            # ------------------------------
-
-            html = download(
-
-                url,
-
-                HEADERS
+                f"開始搜尋：{keyword}"
 
             )
 
 
 
-            # ------------------------------
-            # 下載失敗
-            # ------------------------------
+            search_results = search(
 
-            if html is None:
+                keyword,
 
-
-                item.status = "Failed"
-
-                item.error = "Download failed"
-                failed_count += 1
-
-                articles.append(
-
-                    item
-
-                )
-
-
-                continue
-
-
-
-            # ------------------------------
-            # HTML解析
-            #
-            # 回傳 Article
-            #
-            # ------------------------------
-
-            article = parse(
-
-                html,
-
-                keyword
+                MAX_RESULTS
 
             )
-            
-            
-            article.document_id = generate_hash(
-                article.title,
-                article.content
-            )   
-            
-            if is_duplicate(
-                article.document_id
-            ):
-
-                print(
-                    "重複資料，跳過：",
-                    article.title
-                )
-                
-                duplicate_count += 1
-
-                continue
 
 
 
-            save_document(
-                article.document_id
+            new_count = 0
+
+            duplicate_count = 0
+
+            failed_count = 0
+
+
+
+
+
+
+
+            # ==================================
+            # Article Loop
+            # ==================================
+
+
+            for item in search_results:
+
+
+
+                try:
+
+
+
+                    logger.info(
+
+                        f"處理文章：{item.title}"
+
+                    )
+
+
+
+                    url = item.url
+
+
+
+
+
+
+                    # ==========================
+                    # Download
+                    # ==========================
+
+
+                    html = download(
+
+                        url,
+
+                        HEADERS
+
+                    )
+
+
+
+                    if html is None:
+
+
+
+                        failed_count += 1
+
+
+                        logger.warning(
+
+                            f"Download failed: {url}"
+
+                        )
+
+
+                        continue
+
+
+
+
+
+
+
+                    # ==========================
+                    # Parser
+                    # ==========================
+
+
+                    article = parse(
+
+                        html,
+
+                        keyword
+
+                    )
+
+
+
+                    if article is None:
+
+
+
+                        failed_count += 1
+
+
+                        continue
+
+
+
+
+
+
+
+                    # ==========================
+                    # Search Metadata
+                    # ==========================
+
+
+                    article.keyword = item.keyword
+
+
+                    article.title = item.title
+
+
+                    article.url = item.url
+
+
+                    article.published = item.published
+
+
+                    article.source = item.source
+
+
+                    article.status = "Success"
+
+
+
+
+
+
+
+
+                    # ==========================
+                    # Document ID
+                    # ==========================
+
+
+                    article.document_id = generate_hash(
+
+                        article.title,
+
+                        article.content
+
+                    )
+
+
+
+
+
+
+
+
+
+                    # ==========================
+                    # Duplicate
+                    # ==========================
+
+
+                    if is_duplicate(
+
+                        article.document_id
+
+                    ):
+
+
+
+                        duplicate_count += 1
+
+
+
+                        logger.info(
+
+                            f"Duplicate: {article.title}"
+
+                        )
+
+
+                        continue
+
+
+
+
+
+
+
+                    save_document(
+
+                        article.document_id
+
+                    )
+
+
+                    new_count += 1
+
+
+
+
+
+
+
+
+
+
+
+                    # ==========================
+                    # AI Analysis P4.3
+                    #
+                    # 修正:
+                    #
+                    # 傳入 article.content
+                    #
+                    # ==========================
+
+
+                    try:
+
+
+
+                        analysis = ai_analyzer.analyze(
+
+                            article.content
+
+                        )
+
+
+
+                        article.ai_analysis = analysis
+
+
+
+
+
+
+                        # Debug
+
+                        print()
+
+                        print(
+                            "========== AI RESULT =========="
+                        )
+
+                        print(
+
+                            article.ai_analysis.to_dict()
+
+                        )
+
+                        print(
+                            "=============================="
+                        )
+
+                        print()
+
+
+
+
+
+                        logger.info(
+
+                            f"AI完成: {article.ai_analysis.category}"
+
+                        )
+
+
+
+
+
+
+                    except Exception as e:
+
+
+
+                        logger.error(
+
+                            f"AI Analysis Error: {e}"
+
+                        )
+
+
+                        article.ai_analysis = AIAnalysis()
+
+
+
+
+
+
+
+
+
+
+
+
+                    # ==========================
+                    # Database
+                    # ==========================
+
+
+                    result = repo.save(
+
+                        article
+
+                    )
+
+
+                    logger.info(
+
+                        f"Database Save: {result}"
+
+                    )
+
+
+
+                    articles.append(
+
+                        article
+
+                    )
+
+
+
+
+
+
+
+                except Exception as e:
+
+
+
+                    failed_count += 1
+
+
+                    logger.exception(e)
+
+
+
+
+
+
+
+
+
+
+
+
+            # ==================================
+            # History
+            # ==================================
+
+
+            save_history(
+
+                keyword,
+
+                len(search_results),
+
+                new_count,
+
+                duplicate_count,
+
+                failed_count
+
             )
-            
-            new_count += 1
-
-
-            # ------------------------------
-            # 保留搜尋資料
-            #
-            # 因 parser 不一定知道
-            # Google News資料
-            #
-            # ------------------------------
-
-            article.keyword = item.keyword
-
-
-            article.title = item.title
-
-
-            article.url = item.url
-
-
-            article.published = item.published
-
-
-            article.source = item.source
 
 
 
-            article.status = "Success"
 
 
 
-            # ------------------------------
-            # 加入結果
-            # ------------------------------
 
-            articles.append(
 
-                article
 
-            )
-            try:
+    finally:
 
-                result = repo.save(article)
 
-                print(
-                    "Database Save:",
-                    result,
-                    article.title
-                )
 
-            except Exception as e:
+        repo.close()
 
-                logger.error(
-                    f"Database Error: {e}"
-                )
 
-                raise
-        
-        
-        save_history(
 
-            keyword,
 
-            len(search_results),
 
-            new_count,
 
-            duplicate_count,
-            
-            failed_count
 
-        )
+
 
 
     # ======================================
-    # Excel輸出
+    # Excel Export
     # ======================================
 
-    export(
 
-        articles
+    if articles:
+
+
+
+        export(
+
+            articles
+
+        )
+
+
+
+
+
+    logger.info(
+
+        "========== AutoSearch V3 Finish =========="
 
     )
 
 
 
-    print()
-
-    print(
-        "AutoSearch V2 完成"
-    )
 
 
 
 
 
-# ======================================
-# 程式入口
-# ======================================
+
+
+
+
 
 if __name__ == "__main__":
+
 
     main()

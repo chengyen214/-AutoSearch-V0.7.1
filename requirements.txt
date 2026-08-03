@@ -30,3 +30,7 @@ fastapi
 uvicorn
 
 pytest
+
+python-dotenv
+
+openai
