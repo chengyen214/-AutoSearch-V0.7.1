@@ -1,21 +1,38 @@
 """
 database/migrate.py
 
-AutoSearch V3
+AutoSearch V4
 
-Database Migration
+Database Migration Manager
+
 
 功能:
 
-    執行 database/schema.sql
+1. 建立 Database Schema
+
+2. 執行 Migration
+
+3. Migration History Tracking
+
 
 支援:
 
-    V2.5 Article Database
+V2.5
+    - Article Database
 
-    V3 AI Analysis Database
 
-    P4.4.1 AI Metadata
+V3
+    - AI Analysis Database
+
+
+V4 P1
+    - Knowledge Archive
+    - AI Task Queue
+    - Knowledge Ranking
+
+
+V4 P2.2
+    - Search Index Optimization
 
 """
 
@@ -28,7 +45,258 @@ from utils.logger import logger
 
 
 
+
+# ======================================
+# Migration Files
+# ======================================
+
+
+MIGRATION_FILES = [
+
+
+    "database/schema.sql",
+
+
+    "database/migration_v4_p1_1.sql",
+
+
+    "database/migration_v4_p1_2.sql",
+
+
+    "database/migration_v4_p1_5.sql",
+
+
+    "database/migration_v4_p2_2.sql",
+    
+    "database/migration_v4_p2_2_5.sql",
+
+    # P2.2.2 Archive Version History
+    "database/migration_v4_p2_2_2.sql"
+
+
+]
+
+
+
+
+
+
+
+
+# ======================================
+# Migration History Table
+# ======================================
+
+
+def create_migration_table(cursor):
+
+
+    cursor.execute(
+
+        """
+
+        CREATE TABLE IF NOT EXISTS migration_history
+
+        (
+
+            id INT AUTO_INCREMENT PRIMARY KEY,
+
+
+            filename VARCHAR(255) NOT NULL UNIQUE,
+
+
+            executed_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+        )
+
+        """
+
+    )
+
+
+
+
+
+
+
+
+
+# ======================================
+# Check Migration
+# ======================================
+
+
+def migration_executed(
+
+    cursor,
+
+    filename
+
+):
+
+
+    cursor.execute(
+
+        """
+
+        SELECT id
+
+        FROM migration_history
+
+        WHERE filename = %s
+
+        """,
+
+        (
+
+            filename,
+
+        )
+
+    )
+
+
+
+    result = cursor.fetchone()
+
+
+
+    return result is not None
+
+
+
+
+
+
+
+# ======================================
+# Record Migration
+# ======================================
+
+
+def record_migration(
+
+    cursor,
+
+    filename
+
+):
+
+
+    cursor.execute(
+
+        """
+
+        INSERT INTO migration_history
+
+        (
+
+            filename
+
+        )
+
+        VALUES
+
+        (
+
+            %s
+
+        )
+
+        """,
+
+        (
+
+            filename,
+
+        )
+
+    )
+
+
+
+
+
+
+
+
+
+# ======================================
+# Execute SQL File
+# ======================================
+
+
+def execute_sql_file(
+
+    cursor,
+
+    filepath
+
+):
+
+
+    logger.info(
+
+        f"Loading migration: {filepath}"
+
+    )
+
+
+
+    with open(
+
+        filepath,
+
+        "r",
+
+        encoding="utf-8"
+
+    ) as f:
+
+
+        sql = f.read()
+
+
+
+
+
+    statements = sql.split(";")
+
+
+
+
+
+    for statement in statements:
+
+
+        statement = statement.strip()
+
+
+
+        if statement:
+
+
+            cursor.execute(
+
+                statement
+
+            )
+
+
+
+
+
+
+
+
+
+# ======================================
+# Migration
+# ======================================
+
+
 def migrate():
+
 
 
     conn = get_connection()
@@ -37,9 +305,14 @@ def migrate():
 
     if conn is None:
 
+
         raise Exception(
+
             "Database connection failed."
+
         )
+
+
 
 
 
@@ -47,49 +320,109 @@ def migrate():
 
 
 
+
+
+
     try:
 
 
 
-        with open(
+        # create history table first
 
-            "database/schema.sql",
+        create_migration_table(
 
-            "r",
+            cursor
 
-            encoding="utf-8"
-
-        ) as f:
-
-
-            sql = f.read()
+        )
 
 
 
 
 
-        statements = sql.split(";")
+
+        for migration in MIGRATION_FILES:
+
+
+
+
+            try:
+
+
+
+                if migration_executed(
+
+                    cursor,
+
+                    migration
+
+                ):
+
+
+
+                    logger.info(
+
+                        f"Skip executed migration: {migration}"
+
+                    )
+
+
+                    continue
 
 
 
 
 
-        for statement in statements:
 
+                execute_sql_file(
 
-            statement = statement.strip()
+                    cursor,
 
-
-
-            if statement:
-
-
-
-                cursor.execute(
-
-                    statement
+                    migration
 
                 )
+
+
+
+
+
+
+                record_migration(
+
+                    cursor,
+
+                    migration
+
+                )
+
+
+
+
+
+
+                logger.info(
+
+                    f"Completed: {migration}"
+
+                )
+
+
+
+
+
+
+            except FileNotFoundError:
+
+
+
+                logger.warning(
+
+                    f"Skip missing migration: {migration}"
+
+                )
+
+
+
+
 
 
 
@@ -98,19 +431,41 @@ def migrate():
 
 
 
+
+
         logger.info(
 
-            "Database schema migration complete"
+            "Database migration complete"
 
         )
 
 
+
+
+
+        print()
 
         print(
 
-            "✅ Database schema created."
+            "================================="
 
         )
+
+        print(
+
+            " Database Migration Complete"
+
+        )
+
+        print(
+
+            "================================="
+
+        )
+
+
+
+
 
 
 
@@ -130,7 +485,10 @@ def migrate():
         )
 
 
+
         raise
+
+
 
 
 
@@ -141,7 +499,12 @@ def migrate():
 
         cursor.close()
 
+
         conn.close()
+
+
+
+
 
 
 

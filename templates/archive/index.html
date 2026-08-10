@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Knowledge Archive
+    </title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+
+            margin: 0;
+
+            font-family:
+                Arial,
+                "Microsoft JhengHei",
+                sans-serif;
+
+            background: #f5f7fa;
+
+            color: #1f2937;
+        }
+
+        /* ==================================================
+           Header
+           ================================================== */
+
+        .header {
+
+            background: #1f2937;
+
+            color: white;
+
+            padding: 24px 40px;
+        }
+
+        .header h1 {
+
+            margin: 0;
+
+            font-size: 28px;
+        }
+
+        .header p {
+
+            margin: 8px 0 0;
+
+            color: #d1d5db;
+        }
+
+        /* ==================================================
+           Container
+           ================================================== */
+
+        .container {
+
+            max-width: 1200px;
+
+            margin: 0 auto;
+
+            padding: 30px 20px;
+        }
+
+        /* ==================================================
+           Search
+           ================================================== */
+
+        .search-box {
+
+            display: flex;
+
+            gap: 10px;
+
+            margin-bottom: 30px;
+        }
+
+        .search-box input {
+
+            flex: 1;
+
+            padding: 12px 15px;
+
+            border:
+                1px solid #d1d5db;
+
+            border-radius: 6px;
+
+            font-size: 16px;
+        }
+
+        .search-box button {
+
+            padding:
+                12px 24px;
+
+            border: none;
+
+            border-radius: 6px;
+
+            background: #2563eb;
+
+            color: white;
+
+            font-size: 16px;
+
+            cursor: pointer;
+        }
+
+        .search-box button:hover {
+
+            background: #1d4ed8;
+        }
+
+        /* ==================================================
+           Section
+           ================================================== */
+
+        .section {
+
+            margin-bottom: 30px;
+        }
+
+        .section h2 {
+
+            margin-bottom: 15px;
+
+            font-size: 22px;
+        }
+
+        /* ==================================================
+           Statistics
+           ================================================== */
+
+        .statistics {
+
+            display: grid;
+
+            grid-template-columns:
+                repeat(
+                    3,
+                    1fr
+                );
+
+            gap: 20px;
+        }
+
+        .stat-card {
+
+            background: white;
+
+            border-radius: 8px;
+
+            padding: 24px;
+
+            box-shadow:
+                0 2px 6px
+                rgba(
+                    0,
+                    0,
+                    0,
+                    0.08
+                );
+        }
+
+        .stat-title {
+
+            color: #6b7280;
+
+            font-size: 14px;
+        }
+
+        .stat-value {
+
+            margin-top: 8px;
+
+            font-size: 30px;
+
+            font-weight: bold;
+        }
+
+        /* ==================================================
+           Article List
+           ================================================== */
+
+        .articles {
+
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 15px;
+        }
+
+        .article-card {
+
+            background: white;
+
+            padding: 20px;
+
+            border-radius: 8px;
+
+            box-shadow:
+                0 2px 6px
+                rgba(
+                    0,
+                    0,
+                    0,
+                    0.08
+                );
+        }
+
+        .article-title {
+
+            margin:
+                0 0 10px;
+
+            font-size: 19px;
+
+            color: #111827;
+        }
+
+        .article-meta {
+
+            color: #6b7280;
+
+            font-size: 14px;
+
+            margin-bottom: 10px;
+        }
+
+        .article-summary {
+
+            color: #4b5563;
+
+            line-height: 1.6;
+
+            white-space: pre-wrap;
+        }
+
+        .article-link {
+
+            display: inline-block;
+
+            margin-top: 12px;
+
+            color: #2563eb;
+
+            text-decoration: none;
+
+            cursor: pointer;
+        }
+
+        .article-link:hover {
+
+            text-decoration: underline;
+        }
+
+        /* ==================================================
+           Browse
+           ================================================== */
+
+        .browse {
+
+            display: grid;
+
+            grid-template-columns:
+                repeat(
+                    3,
+                    1fr
+                );
+
+            gap: 15px;
+        }
+
+        .browse-card {
+
+            display: block;
+
+            background: white;
+
+            padding: 20px;
+
+            border-radius: 8px;
+
+            color: #1f2937;
+
+            text-decoration: none;
+
+            box-shadow:
+                0 2px 6px
+                rgba(
+                    0,
+                    0,
+                    0,
+                    0.08
+                );
+        }
+
+        .browse-card:hover {
+
+            background: #eff6ff;
+        }
+
+        .browse-card h3 {
+
+            margin:
+                0 0 8px;
+        }
+
+        .browse-card p {
+
+            margin: 0;
+
+            color: #6b7280;
+        }
+
+        /* ==================================================
+           Pagination
+           ================================================== */
+
+        .pagination {
+
+            display: flex;
+
+            justify-content: center;
+
+            align-items: center;
+
+            gap: 15px;
+
+            margin-top: 20px;
+        }
+
+        .pagination button {
+
+            padding:
+                8px 16px;
+
+            border: none;
+
+            border-radius: 6px;
+
+            background: #2563eb;
+
+            color: white;
+
+            cursor: pointer;
+        }
+
+        .pagination button:disabled {
+
+            background: #d1d5db;
+
+            cursor: not-allowed;
+        }
+
+        .page-info {
+
+            color: #6b7280;
+
+            font-size: 14px;
+        }
+
+        /* ==================================================
+           Status
+           ================================================== */
+
+        .status {
+
+            padding: 15px;
+
+            border-radius: 6px;
+
+            margin-bottom: 15px;
+
+            display: none;
+        }
+
+        .status.error {
+
+            display: block;
+
+            background: #fee2e2;
+
+            color: #991b1b;
+        }
+
+        .status.loading {
+
+            display: block;
+
+            background: #eff6ff;
+
+            color: #1e40af;
+        }
+
+        /* ==================================================
+           Empty
+           ================================================== */
+
+        .empty {
+
+            background: white;
+
+            padding: 30px;
+
+            text-align: center;
+
+            border-radius: 8px;
+
+            color: #6b7280;
+        }
+
+        /* ==================================================
+           Responsive
+           ================================================== */
+
+        @media (
+            max-width: 768px
+        ) {
+
+            .statistics {
+
+                grid-template-columns:
+                    1fr;
+            }
+
+            .browse {
+
+                grid-template-columns:
+                    1fr;
+            }
+
+            .search-box {
+
+                flex-direction: column;
+            }
+
+            .header {
+
+                padding:
+                    20px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<!-- ==================================================
+     Header
+     ================================================== -->
+
+<header class="header">
+
+    <h1>
+        Knowledge Archive
+    </h1>
+
+    <p>
+        AutoSearch V4 · Knowledge Archive
+    </p>
+
+</header>
+
+
+<!-- ==================================================
+     Main
+     ================================================== -->
+
+<main class="container">
+
+
+    <!-- ==================================================
+         Search
+         ================================================== -->
+
+    <section class="section">
+
+        <form
+            class="search-box"
+            id="search-form"
+        >
+
+            <input
+                type="text"
+                id="search-input"
+                placeholder="搜尋 Knowledge Archive..."
+                autocomplete="off"
+            >
+
+            <button
+                type="submit"
+            >
+                Search
+            </button>
+
+        </form>
+
+    </section>
+
+
+    <!-- ==================================================
+         Statistics
+         ================================================== -->
+
+    <section class="section">
+
+        <h2>
+            Archive Statistics
+        </h2>
+
+        <div class="statistics">
+
+
+            <div class="stat-card">
+
+                <div class="stat-title">
+                    Archive Articles
+                </div>
+
+                <div
+                    class="stat-value"
+                    id="article-count"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="stat-title">
+                    Archive Versions
+                </div>
+
+                <div
+                    class="stat-value"
+                    id="archive-count"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="stat-title">
+                    Knowledge Records
+                </div>
+
+                <div
+                    class="stat-value"
+                    id="knowledge-count"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+        </div>
+
+    </section>
+
+
+    <!-- ==================================================
+         Status
+         ================================================== -->
+
+    <div
+        id="status"
+        class="status"
+    ></div>
+
+
+    <!-- ==================================================
+         Latest Articles
+         ================================================== -->
+
+    <section class="section">
+
+        <h2 id="article-section-title">
+
+            Latest Articles
+
+        </h2>
+
+
+        <div
+            class="articles"
+            id="articles"
+        >
+
+            <div class="empty">
+
+                Loading Archive...
+
+            </div>
+
+        </div>
+
+
+        <!-- Pagination -->
+
+        <div
+            class="pagination"
+            id="pagination"
+        >
+
+            <button
+                id="previous-button"
+                onclick="previousPage()"
+            >
+                Previous
+            </button>
+
+
+            <span
+                class="page-info"
+                id="page-info"
+            >
+                Page 1
+            </span>
+
+
+            <button
+                id="next-button"
+                onclick="nextPage()"
+            >
+                Next
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- ==================================================
+         Browse
+         ================================================== -->
+
+    <section class="section">
+
+        <h2>
+            Browse Archive
+        </h2>
+
+
+        <div class="browse">
+
+
+            <a
+                class="browse-card"
+                href="/archive/articles"
+                target="_blank"
+            >
+
+                <h3>
+                    Article Archive
+                </h3>
+
+                <p>
+                    瀏覽所有 Archive Articles
+                </p>
+
+            </a>
+
+
+            <a
+                class="browse-card"
+                href="/archive/statistics"
+                target="_blank"
+            >
+
+                <h3>
+                    Statistics
+                </h3>
+
+                <p>
+                    查看 Knowledge Archive 統計資訊
+                </p>
+
+            </a>
+
+
+            <a
+                class="browse-card"
+                href="/archive/health"
+                target="_blank"
+            >
+
+                <h3>
+                    Archive Health
+                </h3>
+
+                <p>
+                    檢查 Archive API 狀態
+                </p>
+
+            </a>
+
+
+        </div>
+
+    </section>
+
+
+</main>
+
+
+<!-- ==================================================
+     JavaScript
+     ================================================== -->
+
+<script>
+
+    /*
+     * ==================================================
+     * Configuration
+     * ==================================================
+     */
+
+    const API_BASE = "/archive";
+
+
+    let currentPage = 1;
+
+    const pageSize = 10;
+
+
+    /*
+     * ==================================================
+     * DOM
+     * ==================================================
+     */
+
+    const articleContainer =
+        document.getElementById(
+            "articles"
+        );
+
+    const articleSectionTitle =
+        document.getElementById(
+            "article-section-title"
+        );
+
+    const statusElement =
+        document.getElementById(
+            "status"
+        );
+
+    const pageInfo =
+        document.getElementById(
+            "page-info"
+        );
+
+    const previousButton =
+        document.getElementById(
+            "previous-button"
+        );
+
+    const nextButton =
+        document.getElementById(
+            "next-button"
+        );
+
+
+    /*
+     * ==================================================
+     * Status
+     * ==================================================
+     */
+
+    function showLoading() {
+
+        statusElement.className =
+            "status loading";
+
+        statusElement.textContent =
+            "Loading Archive...";
+
+    }
+
+
+    function hideStatus() {
+
+        statusElement.className =
+            "status";
+
+        statusElement.textContent =
+            "";
+
+    }
+
+
+    function showError(message) {
+
+        statusElement.className =
+            "status error";
+
+        statusElement.textContent =
+            message;
+
+    }
+
+
+    /*
+     * ==================================================
+     * Statistics
+     * ==================================================
+     */
+
+    async function loadStatistics() {
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_BASE}/statistics`
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "Statistics API failed"
+                );
+
+            }
+
+
+            const data =
+                await response.json();
+
+
+            /*
+             * 支援目前 Service
+             * 可能使用的不同 key。
+             */
+
+            document.getElementById(
+                "article-count"
+            ).textContent =
+                data.article_count
+                ?? data.articles
+                ?? data.total_articles
+                ?? 0;
+
+
+            document.getElementById(
+                "archive-count"
+            ).textContent =
+                data.archive_count
+                ?? data.archives
+                ?? data.total_archives
+                ?? data.count
+                ?? 0;
+
+
+            document.getElementById(
+                "knowledge-count"
+            ).textContent =
+                data.knowledge_count
+                ?? data.knowledge
+                ?? data.total_knowledge
+                ?? 0;
+
+        }
+
+        catch (error) {
+
+            console.error(
+                error
+            );
+
+        }
+
+    }
+
+
+    /*
+     * ==================================================
+     * Load Articles
+     * ==================================================
+     */
+
+    async function loadArticles(
+        page = 1
+    ) {
+
+        showLoading();
+
+
+        articleContainer.innerHTML =
+            `
+            <div class="empty">
+                Loading Archive...
+            </div>
+            `;
+
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_BASE}/articles/page`
+                    + `?page=${page}`
+                    + `&page_size=${pageSize}`
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    `HTTP ${response.status}`
+                );
+
+            }
+
+
+            const data =
+                await response.json();
+
+
+            renderArticles(
+                data
+            );
+
+
+            currentPage =
+                page;
+
+
+            updatePagination(
+                data
+            );
+
+
+            hideStatus();
+
+        }
+
+        catch (error) {
+
+            console.error(
+                error
+            );
+
+
+            articleContainer.innerHTML =
+                `
+                <div class="empty">
+                    Unable to load Archive Articles.
+                </div>
+                `;
+
+
+            showError(
+                "無法取得 Archive Articles。"
+            );
+
+        }
+
+    }
+
+
+    /*
+     * ==================================================
+     * Render Articles
+     * ==================================================
+     */
+
+    function renderArticles(
+        data
+    ) {
+
+        /*
+         * Service 可能直接回傳 list，
+         * 或回傳：
+         *
+         * {
+         *     "items": [],
+         *     "total": ...
+         * }
+         */
+
+        let articles;
+
+
+        if (Array.isArray(data)) {
+
+            articles = data;
+
+        }
+
+        else {
+
+            articles =
+                data.items
+                ?? data.articles
+                ?? data.results
+                ?? [];
+
+        }
+
+
+        if (
+            !articles ||
+            articles.length === 0
+        ) {
+
+            articleContainer.innerHTML =
+                `
+                <div class="empty">
+                    No Archive Articles Found.
+                </div>
+                `;
+
+            return;
+
+        }
+
+
+        articleContainer.innerHTML =
+            "";
+
+
+        articles.forEach(
+            article => {
+
+                const card =
+                    document.createElement(
+                        "div"
+                    );
+
+
+                card.className =
+                    "article-card";
+
+
+                const title =
+                    escapeHtml(
+                        article.title
+                        ?? "Untitled"
+                    );
+
+
+                const source =
+                    escapeHtml(
+                        article.source
+                        ?? "Unknown"
+                    );
+
+
+                const published =
+                    escapeHtml(
+                        article.published
+                        ?? article.crawl_time
+                        ?? ""
+                    );
+
+
+                const content =
+                    escapeHtml(
+                        article.content
+                        ?? article.summary
+                        ?? ""
+                    );
+
+
+                const id =
+                    article.id;
+
+
+                card.innerHTML =
+                    `
+                    <h3 class="article-title">
+
+                        ${title}
+
+                    </h3>
+
+
+                    <div class="article-meta">
+
+                        Source:
+                        ${source}
+
+                        &nbsp;·&nbsp;
+
+                        ${published}
+
+                    </div>
+
+
+                    <div class="article-summary">
+
+                        ${truncate(
+                            content,
+                            300
+                        )}
+
+                    </div>
+
+
+                    ${
+                        id !== undefined
+                        ?
+                        `
+                        <a
+                            class="article-link"
+                            href="${API_BASE}/articles/${id}"
+                            target="_blank"
+                        >
+                            View Article →
+                        </a>
+                        `
+                        :
+                        ""
+                    }
+
+                    `;
+
+
+                articleContainer.appendChild(
+                    card
+                );
+
+            }
+        );
+
+    }
+
+
+    /*
+     * ==================================================
+     * Pagination
+     * ==================================================
+     */
+
+    function updatePagination(
+        data
+    ) {
+
+        let totalPages =
+            null;
+
+
+        if (
+            data &&
+            !Array.isArray(data)
+        ) {
+
+            if (
+                data.total_pages !==
+                undefined
+            ) {
+
+                totalPages =
+                    data.total_pages;
+
+            }
+
+            else if (
+                data.total !==
+                undefined
+            ) {
+
+                totalPages =
+                    Math.ceil(
+                        data.total /
+                        pageSize
+                    );
+
+            }
+
+        }
+
+
+        pageInfo.textContent =
+            `Page ${currentPage}`;
+
+
+        previousButton.disabled =
+            currentPage <= 1;
+
+
+        if (
+            totalPages !== null
+        ) {
+
+            nextButton.disabled =
+                currentPage >=
+                totalPages;
+
+        }
+
+        else {
+
+            /*
+             * 沒有 total 資訊時，
+             * 使用目前資料數量判斷。
+             */
+
+            let articles =
+                Array.isArray(data)
+                ?
+                data
+                :
+                (
+                    data.items
+                    ?? data.articles
+                    ?? data.results
+                    ?? []
+                );
+
+
+            nextButton.disabled =
+                articles.length <
+                pageSize;
+
+        }
+
+    }
+
+
+    function previousPage() {
+
+        if (
+            currentPage <= 1
+        ) {
+
+            return;
+
+        }
+
+
+        loadArticles(
+            currentPage - 1
+        );
+
+    }
+
+
+    function nextPage() {
+
+        if (
+            nextButton.disabled
+        ) {
+
+            return;
+
+        }
+
+
+        loadArticles(
+            currentPage + 1
+        );
+
+    }
+
+
+    /*
+     * ==================================================
+     * Search
+     * ==================================================
+     */
+
+    document.getElementById(
+        "search-form"
+    ).addEventListener(
+        "submit",
+        async function(event) {
+
+            event.preventDefault();
+
+
+            const input =
+                document.getElementById(
+                    "search-input"
+                );
+
+
+            const query =
+                input.value.trim();
+
+
+            if (!query) {
+
+                return;
+
+            }
+
+
+            searchArchive(
+                query
+            );
+
+        }
+    );
+
+
+    async function searchArchive(
+        query
+    ) {
+
+        showLoading();
+
+
+        articleContainer.innerHTML =
+            `
+            <div class="empty">
+                Searching Archive...
+            </div>
+            `;
+
+
+        try {
+
+            const response =
+                await fetch(
+                    `${API_BASE}/search`
+                    + `?q=${encodeURIComponent(
+                        query
+                    )}`
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    `HTTP ${response.status}`
+                );
+
+            }
+
+
+            const data =
+                await response.json();
+
+
+            articleSectionTitle.textContent =
+                `Search Results: ${query}`;
+
+
+            renderArticles(
+                data
+            );
+
+
+            hideStatus();
+
+
+            /*
+             * 搜尋結果不是 Pagination API，
+             * 因此暫時停用 Pagination。
+             */
+
+            previousButton.disabled =
+                true;
+
+            nextButton.disabled =
+                true;
+
+            pageInfo.textContent =
+                "Search";
+
+
+        }
+
+        catch (error) {
+
+            console.error(
+                error
+            );
+
+
+            articleContainer.innerHTML =
+                `
+                <div class="empty">
+                    Search failed.
+                </div>
+                `;
+
+
+            showError(
+                "Archive 搜尋失敗。"
+            );
+
+        }
+
+    }
+
+
+    /*
+     * ==================================================
+     * Utility
+     * ==================================================
+     */
+
+    function truncate(
+        text,
+        maxLength
+    ) {
+
+        if (!text) {
+
+            return "";
+
+        }
+
+
+        if (
+            text.length <=
+            maxLength
+        ) {
+
+            return text;
+
+        }
+
+
+        return (
+            text.substring(
+                0,
+                maxLength
+            )
+            + "..."
+        );
+
+    }
+
+
+    function escapeHtml(
+        value
+    ) {
+
+        const div =
+            document.createElement(
+                "div"
+            );
+
+
+        div.textContent =
+            String(value);
+
+
+        return div.innerHTML;
+
+    }
+
+
+    /*
+     * ==================================================
+     * Initial Load
+     * ==================================================
+     */
+
+    async function initialize() {
+
+        await loadStatistics();
+
+        await loadArticles(
+            1
+        );
+
+    }
+
+
+    initialize();
+
+</script>
+
+
+</body>
+
+</html>

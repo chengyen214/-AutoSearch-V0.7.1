@@ -1,11 +1,9 @@
 """
 models/article.py
 
-AutoSearch V3
+AutoSearch V4
 
 Article Data Model
-
-P4.4.3
 
 支援:
 
@@ -14,15 +12,17 @@ V2.5 Database
 V3 AI Analysis
 
 V3 API
-"""
 
+V4 Knowledge Archive
+
+P2.2.5 Async AI Analysis Pipeline
+"""
 
 from datetime import datetime
 
 
 
 class Article:
-
 
 
     def __init__(
@@ -35,21 +35,35 @@ class Article:
 
         url="",
 
-        published="",
+        published=None,
 
         source="",
 
         content="",
 
+
         crawl_time=None,
 
+
         status="Success",
+
 
         document_id=""
 
     ):
 
 
+        # ==============================
+        # Database ID
+        # ==============================
+
+        self.id = None
+
+
+
+        # ==============================
+        # Article Basic Data
+        # ==============================
 
         self.keyword = keyword
 
@@ -76,10 +90,27 @@ class Article:
         )
 
 
+
         self.status = status
 
 
+
         self.document_id = document_id
+
+
+
+        # ==============================
+        # P2.2.5 Async AI Pipeline Status
+        #
+        # pending
+        # processing
+        # completed
+        # failed
+        #
+        # ==============================
+
+        self.ai_status = "pending"
+
 
 
 
@@ -88,6 +119,23 @@ class Article:
         # ==============================
 
         self.ai_analysis = None
+
+
+
+
+        # ==============================
+        # V4 Archive
+        # ==============================
+
+        self.raw_document = None
+
+
+        self.metadata = None
+
+
+        self.knowledge = None
+
+
 
 
 
@@ -101,7 +149,9 @@ class Article:
     @property
     def ai_summary(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -113,7 +163,9 @@ class Article:
 
             )
 
+
         return ""
+
 
 
 
@@ -121,7 +173,9 @@ class Article:
     @property
     def ai_category(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -133,7 +187,9 @@ class Article:
 
             )
 
+
         return ""
+
 
 
 
@@ -141,7 +197,9 @@ class Article:
     @property
     def ai_keywords(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -153,7 +211,9 @@ class Article:
 
             )
 
+
         return []
+
 
 
 
@@ -161,7 +221,9 @@ class Article:
     @property
     def ai_importance(self):
 
+
         if self.ai_analysis:
+
 
             return int(
 
@@ -177,7 +239,9 @@ class Article:
 
             )
 
+
         return 0
+
 
 
 
@@ -185,7 +249,9 @@ class Article:
     @property
     def ai_model(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -197,7 +263,9 @@ class Article:
 
             )
 
+
         return ""
+
 
 
 
@@ -205,7 +273,9 @@ class Article:
     @property
     def ai_version(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -217,7 +287,9 @@ class Article:
 
             )
 
+
         return ""
+
 
 
 
@@ -225,7 +297,9 @@ class Article:
     @property
     def ai_analyze_time(self):
 
+
         if self.ai_analysis:
+
 
             return getattr(
 
@@ -237,7 +311,9 @@ class Article:
 
             )
 
+
         return None
+
 
 
 
@@ -245,7 +321,9 @@ class Article:
     @property
     def ai_confidence(self):
 
+
         if self.ai_analysis:
+
 
             return float(
 
@@ -261,7 +339,66 @@ class Article:
 
             )
 
+
         return 0.0
+
+
+
+
+
+
+
+    # ==================================
+    # V4 Archive Property
+    # ==================================
+
+
+    @property
+    def archive_path(self):
+
+
+        if self.raw_document:
+
+
+            return getattr(
+
+                self.raw_document,
+
+                "storage_path",
+
+                ""
+
+            )
+
+
+        return ""
+
+
+
+
+
+
+    @property
+    def knowledge_topic(self):
+
+
+        if self.knowledge:
+
+
+            return getattr(
+
+                self.knowledge,
+
+                "topic",
+
+                ""
+
+            )
+
+
+        return ""
+
+
 
 
 
@@ -278,10 +415,14 @@ class Article:
         return {
 
 
+            "id":
+
+            self.id,
+
+
             "document_id":
 
             self.document_id,
-
 
 
             "keyword":
@@ -289,11 +430,9 @@ class Article:
             self.keyword,
 
 
-
             "title":
 
             self.title,
-
 
 
             "url":
@@ -301,11 +440,9 @@ class Article:
             self.url,
 
 
-
             "source":
 
             self.source,
-
 
 
             "published":
@@ -313,11 +450,9 @@ class Article:
             self.published,
 
 
-
             "content":
 
             self.content,
-
 
 
             "crawl_time":
@@ -325,15 +460,24 @@ class Article:
             self.crawl_time,
 
 
-
             "status":
 
             self.status,
 
 
+            # ======================
+            # P2.2.5 Async AI
+            # ======================
+
+
+            "ai_status":
+
+            self.ai_status,
+
+
 
             # ======================
-            # AI
+            # V3 AI
             # ======================
 
 
@@ -342,11 +486,9 @@ class Article:
             self.ai_summary,
 
 
-
             "ai_category":
 
             self.ai_category,
-
 
 
             "ai_keywords":
@@ -354,11 +496,9 @@ class Article:
             self.ai_keywords,
 
 
-
             "ai_importance":
 
             self.ai_importance,
-
 
 
             "ai_model":
@@ -366,11 +506,9 @@ class Article:
             self.ai_model,
 
 
-
             "ai_version":
 
             self.ai_version,
-
 
 
             "ai_analyze_time":
@@ -378,13 +516,29 @@ class Article:
             self.ai_analyze_time,
 
 
-
             "ai_confidence":
 
-            self.ai_confidence
+            self.ai_confidence,
+
+
+
+            # ======================
+            # V4 Archive
+            # ======================
+
+
+            "archive_path":
+
+            self.archive_path,
+
+
+            "knowledge_topic":
+
+            self.knowledge_topic
 
 
         }
+
 
 
 
@@ -397,11 +551,15 @@ class Article:
 
             f"Article("
 
+            f"id={self.id}, "
+
             f"title={self.title}, "
 
             f"AI={self.ai_category}, "
 
-            f"importance={self.ai_importance}"
+            f"importance={self.ai_importance}, "
+
+            f"status={self.ai_status}"
 
             ")"
 

@@ -63,12 +63,13 @@ from utils.logger import logger
 # Router
 # ==================================================
 
-
 router = APIRouter(
-
+    
     prefix="/articles",
 
-    tags=["Articles"]
+    tags=[
+        "Article API"
+    ]
 
 )
 

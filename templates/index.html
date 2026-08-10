@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+
+<html lang="zh-TW">
+
+<head>
+
+```
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>
+    AutoSearch V4
+</title>
+
+<style>
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+
+        margin: 0;
+
+        font-family:
+            Arial,
+            "Microsoft JhengHei",
+            sans-serif;
+
+        background: #f5f7fa;
+
+        color: #1f2937;
+    }
+
+    .header {
+
+        background: #1f2937;
+
+        color: white;
+
+        padding: 30px 40px;
+    }
+
+    .header h1 {
+
+        margin: 0;
+
+        font-size: 32px;
+    }
+
+    .header p {
+
+        margin: 8px 0 0;
+
+        color: #d1d5db;
+    }
+
+    .container {
+
+        max-width: 1200px;
+
+        margin: 0 auto;
+
+        padding: 40px 20px;
+    }
+
+    .section {
+
+        margin-bottom: 35px;
+    }
+
+    .section h2 {
+
+        margin-bottom: 20px;
+    }
+
+    .cards {
+
+        display: grid;
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+        gap: 20px;
+    }
+
+    .card {
+
+        display: block;
+
+        background: white;
+
+        padding: 30px;
+
+        border-radius: 10px;
+
+        text-decoration: none;
+
+        color: #1f2937;
+
+        box-shadow:
+            0 2px 8px
+            rgba(
+                0,
+                0,
+                0,
+                0.08
+            );
+
+        transition:
+            transform 0.15s,
+            box-shadow 0.15s;
+    }
+
+    .card:hover {
+
+        transform:
+            translateY(-3px);
+
+        box-shadow:
+            0 6px 16px
+            rgba(
+                0,
+                0,
+                0,
+                0.12
+            );
+    }
+
+    .card-icon {
+
+        font-size: 38px;
+
+        margin-bottom: 15px;
+    }
+
+    .card h3 {
+
+        margin: 0 0 10px;
+
+        font-size: 22px;
+    }
+
+    .card p {
+
+        margin: 0;
+
+        color: #6b7280;
+
+        line-height: 1.6;
+    }
+
+    .footer {
+
+        margin-top: 50px;
+
+        padding-top: 20px;
+
+        border-top:
+            1px solid #e5e7eb;
+
+        color: #6b7280;
+
+        text-align: center;
+    }
+
+    @media (
+        max-width: 768px
+    ) {
+
+        .cards {
+
+            grid-template-columns:
+                1fr;
+        }
+
+        .header {
+
+            padding: 25px 20px;
+        }
+
+    }
+
+</style>
+```
+
+</head>
+
+<body>
+
+<!-- ==================================================
+     Header
+     ================================================== -->
+
+<header class="header">
+
+```
+<h1>
+    AutoSearch V4
+</h1>
+
+<p>
+    AI Knowledge Search & Knowledge Archive Platform
+</p>
+```
+
+</header>
+
+<div class="container">
+
+<!-- ==============================================
+     Navigation
+     ============================================== -->
+
+<section class="section">
+
+```
+<h2>
+    AutoSearch V4
+</h2>
+
+
+<div class="cards">
+
+
+    <!-- ======================================
+         Knowledge Archive
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/archive/ui"
+    >
+
+        <div class="card-icon">
+            📚
+        </div>
+
+        <h3>
+            Knowledge Archive
+        </h3>
+
+        <p>
+            查看 Knowledge Archive，
+            瀏覽文章、版本、搜尋結果、
+            Knowledge History 與 Knowledge Evolution。
+        </p>
+
+    </a>
+
+
+    <!-- ======================================
+         Composite Archive Search
+         P2.4.3
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/archive/search"
+    >
+
+        <div class="card-icon">
+            🔎
+        </div>
+
+        <h3>
+            Composite Search
+        </h3>
+
+        <p>
+            使用多條件搜尋 Knowledge Archive，
+            支援 Keyword、Source、日期、
+            Category 與 Importance 等條件。
+        </p>
+
+    </a>
+
+
+    <!-- ======================================
+         Swagger
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/docs"
+    >
+
+        <div class="card-icon">
+            🔧
+        </div>
+
+        <h3>
+            API Documentation
+        </h3>
+
+        <p>
+            開啟 FastAPI Swagger，
+            查看與測試 AutoSearch V4 所有 API。
+        </p>
+
+    </a>
+
+
+    <!-- ======================================
+         Archive Management
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/management/archive"
+    >
+
+        <div class="card-icon">
+            🗄️
+        </div>
+
+        <h3>
+            Archive Management
+        </h3>
+
+        <p>
+            管理 Knowledge Archive，
+            查看 Articles、Versions、
+            Knowledge 與 Search Index。
+        </p>
+
+    </a>
+
+
+</div>
+```
+
+</section>
+
+<!-- ==================================================
+     System Information
+     ================================================== -->
+
+<section class="section">
+
+```
+<h2>
+    System
+</h2>
+
+
+<div class="cards">
+
+
+    <!-- ======================================
+         API Status
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/api"
+    >
+
+        <div class="card-icon">
+            ⚙️
+        </div>
+
+        <h3>
+            API Status
+        </h3>
+
+        <p>
+            查看 AutoSearch V4 API
+            系統狀態與模組資訊。
+        </p>
+
+    </a>
+
+
+    <!-- ======================================
+         Archive Health
+         P2.4.1
+         ====================================== -->
+
+    <a
+        class="card"
+        href="/management/archive/health"
+    >
+
+        <div class="card-icon">
+            ❤️
+        </div>
+
+        <h3>
+            Archive Health
+        </h3>
+
+        <p>
+            檢查 Knowledge Archive
+            Management API 是否正常運作。
+        </p>
+
+    </a>
+
+
+</div>
+```
+
+</section>
+
+<!-- ==================================================
+     Footer
+     ================================================== -->
+
+<footer class="footer">
+
+```
+AutoSearch V4 · Knowledge Platform
+```
+
+</footer>
+
+</div>
+
+</body>
+
+</html>

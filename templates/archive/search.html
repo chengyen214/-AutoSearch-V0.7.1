@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+
+<html lang="zh-Hant">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        AutoSearch V4 - Composite Archive Search
+    </title>
+
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        body {
+
+            font-family:
+                Arial,
+                "Microsoft JhengHei",
+                sans-serif;
+
+            margin: 0;
+
+            padding: 0;
+
+            background: #f5f7fa;
+
+            color: #222;
+        }
+
+
+        header {
+
+            background: #1f2937;
+
+            color: white;
+
+            padding: 20px 40px;
+        }
+
+
+        header h1 {
+
+            margin: 0 0 5px 0;
+
+            font-size: 26px;
+        }
+
+
+        header p {
+
+            margin: 0;
+
+            opacity: 0.8;
+        }
+
+
+        nav {
+
+            margin-top: 15px;
+        }
+
+
+        nav a {
+
+            color: white;
+
+            text-decoration: none;
+
+            margin-right: 20px;
+        }
+
+
+        nav a:hover {
+
+            text-decoration: underline;
+        }
+
+
+        .container {
+
+            max-width: 1200px;
+
+            margin: 30px auto;
+
+            padding: 0 20px;
+        }
+
+
+        .card {
+
+            background: white;
+
+            border-radius: 8px;
+
+            padding: 24px;
+
+            margin-bottom: 20px;
+
+            box-shadow:
+                0 2px 8px
+                rgba(
+                    0,
+                    0,
+                    0,
+                    0.08
+                );
+        }
+
+
+        .card h2 {
+
+            margin-top: 0;
+        }
+
+
+        .search-grid {
+
+            display: grid;
+
+            grid-template-columns:
+                repeat(3, 1fr);
+
+            gap: 15px;
+        }
+
+
+        .field {
+
+            display: flex;
+
+            flex-direction: column;
+        }
+
+
+        .field label {
+
+            font-weight: bold;
+
+            margin-bottom: 6px;
+        }
+
+
+        .field input {
+
+            padding: 10px;
+
+            border:
+                1px solid #d1d5db;
+
+            border-radius: 5px;
+
+            font-size: 14px;
+        }
+
+
+        .field input:focus {
+
+            outline: none;
+
+            border-color: #2563eb;
+
+            box-shadow:
+                0 0 0 2px
+                rgba(
+                    37,
+                    99,
+                    235,
+                    0.15
+                );
+        }
+
+
+        .actions {
+
+            margin-top: 20px;
+        }
+
+
+        button {
+
+            padding:
+                10px 18px;
+
+            border: none;
+
+            border-radius: 5px;
+
+            cursor: pointer;
+
+            font-size: 14px;
+        }
+
+
+        .search-button {
+
+            background: #2563eb;
+
+            color: white;
+        }
+
+
+        .search-button:hover {
+
+            background: #1d4ed8;
+        }
+
+
+        .search-button:disabled {
+
+            background: #93c5fd;
+
+            cursor: not-allowed;
+        }
+
+
+        .reset-button {
+
+            background: #6b7280;
+
+            color: white;
+
+            margin-left: 8px;
+        }
+
+
+        .reset-button:hover {
+
+            background: #4b5563;
+        }
+
+
+        .result-info {
+
+            display: flex;
+
+            gap: 20px;
+
+            margin-bottom: 15px;
+
+            font-weight: bold;
+
+            flex-wrap: wrap;
+        }
+
+
+        .result {
+
+            border-top:
+                1px solid #e5e7eb;
+
+            padding: 18px 0;
+        }
+
+
+        .result:first-child {
+
+            border-top: none;
+        }
+
+
+        .result-title {
+
+            font-size: 18px;
+
+            font-weight: bold;
+
+            margin-bottom: 8px;
+        }
+
+
+        .result-title a {
+
+            color: #2563eb;
+
+            text-decoration: none;
+        }
+
+
+        .result-title a:hover {
+
+            text-decoration: underline;
+        }
+
+
+        .meta {
+
+            color: #6b7280;
+
+            font-size: 13px;
+
+            margin-bottom: 8px;
+
+            line-height: 1.7;
+        }
+
+
+        .content {
+
+            line-height: 1.6;
+
+            color: #374151;
+
+            white-space: pre-wrap;
+        }
+
+
+        .badge {
+
+            display: inline-block;
+
+            padding:
+                3px 8px;
+
+            margin-right: 5px;
+
+            margin-bottom: 4px;
+
+            border-radius: 4px;
+
+            background: #e5e7eb;
+
+            font-size: 12px;
+        }
+
+
+        .importance {
+
+            background: #fef3c7;
+
+            color: #92400e;
+        }
+
+
+        .category {
+
+            background: #dbeafe;
+
+            color: #1e40af;
+        }
+
+
+        .source {
+
+            background: #dcfce7;
+
+            color: #166534;
+        }
+
+
+        .pagination {
+
+            display: flex;
+
+            justify-content: center;
+
+            align-items: center;
+
+            gap: 10px;
+
+            margin-top: 20px;
+        }
+
+
+        .pagination button {
+
+            background: #374151;
+
+            color: white;
+        }
+
+
+        .pagination button:hover:not(:disabled) {
+
+            background: #111827;
+        }
+
+
+        .pagination button:disabled {
+
+            background: #d1d5db;
+
+            cursor: not-allowed;
+        }
+
+
+        .page-info {
+
+            font-weight: bold;
+
+            color: #374151;
+        }
+
+
+        .status {
+
+            margin-top: 15px;
+
+            color: #6b7280;
+
+            min-height: 20px;
+        }
+
+
+        .success {
+
+            color: #166534;
+
+            font-weight: bold;
+        }
+
+
+        .error {
+
+            color: #dc2626;
+
+            font-weight: bold;
+        }
+
+
+        .empty {
+
+            padding: 30px;
+
+            text-align: center;
+
+            color: #6b7280;
+        }
+
+
+        .loading {
+
+            padding: 30px;
+
+            text-align: center;
+
+            color: #6b7280;
+        }
+
+
+        .filter-summary {
+
+            margin-top: 10px;
+
+            color: #6b7280;
+
+            font-size: 13px;
+        }
+
+
+        @media (
+            max-width: 800px
+        ) {
+
+            .search-grid {
+
+                grid-template-columns:
+                    1fr;
+            }
+
+
+            header {
+
+                padding:
+                    20px;
+            }
+
+
+            .container {
+
+                padding:
+                    0 12px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<!-- ============================================= -->
+<!-- Header -->
+<!-- ============================================= -->
+
+<header>
+
+    <h1>
+        AutoSearch V4
+    </h1>
+
+    <p>
+        Composite Archive Search
+    </p>
+
+
+    <nav>
+
+        <a href="/">
+            Dashboard
+        </a>
+
+        <a href="/archive/ui">
+            Knowledge Archive
+        </a>
+
+    </nav>
+
+</header>
+
+
+
+<!-- ============================================= -->
+<!-- Main -->
+<!-- ============================================= -->
+
+<div class="container">
+
+
+    <!-- ========================================= -->
+    <!-- Search Form -->
+    <!-- ========================================= -->
+
+    <div class="card">
+
+        <h2>
+            Composite Archive Search
+        </h2>
+
+
+        <div class="search-grid">
+
+
+            <!-- Keyword -->
+
+            <div class="field">
+
+                <label for="keyword">
+                    Keyword
+                </label>
+
+                <input
+                    type="text"
+                    id="keyword"
+                    placeholder="例如：TSMC"
+                >
+
+            </div>
+
+
+            <!-- Source -->
+
+            <div class="field">
+
+                <label for="source">
+                    Source
+                </label>
+
+                <input
+                    type="text"
+                    id="source"
+                    placeholder="例如：CNA"
+                >
+
+            </div>
+
+
+            <!-- Category -->
+
+            <div class="field">
+
+                <label for="category">
+                    Category
+                </label>
+
+                <input
+                    type="text"
+                    id="category"
+                    placeholder="例如：Semiconductor"
+                >
+
+            </div>
+
+
+            <!-- Date From -->
+
+            <div class="field">
+
+                <label for="date_from">
+                    Date From
+                </label>
+
+                <input
+                    type="date"
+                    id="date_from"
+                >
+
+            </div>
+
+
+            <!-- Date To -->
+
+            <div class="field">
+
+                <label for="date_to">
+                    Date To
+                </label>
+
+                <input
+                    type="date"
+                    id="date_to"
+                >
+
+            </div>
+
+
+            <!-- Year -->
+
+            <div class="field">
+
+                <label for="year">
+                    Year
+                </label>
+
+                <input
+                    type="number"
+                    id="year"
+                    placeholder="2026"
+                >
+
+            </div>
+
+
+            <!-- Month -->
+
+            <div class="field">
+
+                <label for="month">
+                    Month
+                </label>
+
+                <input
+                    type="number"
+                    id="month"
+                    min="1"
+                    max="12"
+                    placeholder="8"
+                >
+
+            </div>
+
+
+            <!-- Importance Min -->
+
+            <div class="field">
+
+                <label for="importance_min">
+                    Importance Min
+                </label>
+
+                <input
+                    type="number"
+                    id="importance_min"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    placeholder="例如：8"
+                >
+
+            </div>
+
+
+            <!-- Importance Max -->
+
+            <div class="field">
+
+                <label for="importance_max">
+                    Importance Max
+                </label>
+
+                <input
+                    type="number"
+                    id="importance_max"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    placeholder="例如：10"
+                >
+
+            </div>
+
+
+            <!-- Page Size -->
+
+            <div class="field">
+
+                <label for="page_size">
+                    Page Size
+                </label>
+
+                <input
+                    type="number"
+                    id="page_size"
+                    min="1"
+                    max="100"
+                    value="20"
+                >
+
+            </div>
+
+
+        </div>
+
+
+        <div class="actions">
+
+            <button
+                id="search-button"
+                class="search-button"
+                onclick="searchArchive(1)"
+            >
+                Search
+            </button>
+
+
+            <button
+                class="reset-button"
+                onclick="resetSearch()"
+            >
+                Reset
+            </button>
+
+        </div>
+
+
+        <div
+            id="status"
+            class="status"
+        ></div>
+
+    </div>
+
+
+
+    <!-- ========================================= -->
+    <!-- Results -->
+    <!-- ========================================= -->
+
+    <div class="card">
+
+        <h2>
+            Search Results
+        </h2>
+
+
+        <div
+            id="result-info"
+            class="result-info"
+        >
+        </div>
+
+
+        <div
+            id="filter-summary"
+            class="filter-summary"
+        >
+        </div>
+
+
+        <div
+            id="results"
+        >
+        </div>
+
+
+        <div
+            id="pagination"
+            class="pagination"
+        >
+        </div>
+
+    </div>
+
+
+</div>
+
+
+
+<!-- ============================================= -->
+<!-- JavaScript -->
+<!-- ============================================= -->
+
+<script>
+
+
+/* ==================================================
+   API Endpoint
+   ==================================================
+
+   /archive/search
+       ↓
+   Web UI
+
+   /archive/search/api
+       ↓
+   Composite Search JSON API
+
+   ================================================== */
+
+const SEARCH_API =
+    "/archive/search/api";
+
+
+
+/* ==================================================
+   Safe HTML Escape
+   ================================================== */
+
+function escapeHtml(value) {
+
+    if (
+        value === null ||
+        value === undefined
+    ) {
+
+        return "";
+
+    }
+
+
+    return String(value)
+
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+
+        .replace(
+            /</g,
+            "&lt;"
+        )
+
+        .replace(
+            />/g,
+            "&gt;"
+        )
+
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+}
+
+
+
+/* ==================================================
+   Get Value
+   ================================================== */
+
+function getValue(
+    item,
+    names
+) {
+
+    for (
+        const name of names
+    ) {
+
+        if (
+            item !== null &&
+            item !== undefined &&
+            item[name] !== undefined &&
+            item[name] !== null
+        ) {
+
+            return item[name];
+
+        }
+
+    }
+
+
+    return null;
+}
+
+
+
+/* ==================================================
+   Build Query Parameters
+   ================================================== */
+
+function buildSearchParams(
+    page
+) {
+
+    const params =
+        new URLSearchParams();
+
+
+    const fields = [
+
+        "keyword",
+
+        "source",
+
+        "date_from",
+
+        "date_to",
+
+        "year",
+
+        "month",
+
+        "category",
+
+        "importance_min",
+
+        "importance_max"
+
+    ];
+
+
+    fields.forEach(
+        function(field) {
+
+            const element =
+                document.getElementById(
+                    field
+                );
+
+
+            if (!element) {
+
+                return;
+
+            }
+
+
+            const value =
+                element.value.trim();
+
+
+            /*
+             * Composite Search 原則：
+             *
+             * 使用者沒有輸入的條件
+             * 不送出。
+             */
+
+            if (value !== "") {
+
+                params.set(
+                    field,
+                    value
+                );
+
+            }
+
+        }
+    );
+
+
+    const pageSize =
+        document.getElementById(
+            "page_size"
+        ).value;
+
+
+    if (pageSize !== "") {
+
+        params.set(
+            "page_size",
+            pageSize
+        );
+
+    }
+
+
+    params.set(
+        "page",
+        page
+    );
+
+
+    return params;
+}
+
+
+
+/* ==================================================
+   Search Archive
+   ================================================== */
+
+async function searchArchive(
+    page = 1
+) {
+
+    const status =
+        document.getElementById(
+            "status"
+        );
+
+    const results =
+        document.getElementById(
+            "results"
+        );
+
+    const resultInfo =
+        document.getElementById(
+            "result-info"
+        );
+
+    const filterSummary =
+        document.getElementById(
+            "filter-summary"
+        );
+
+    const pagination =
+        document.getElementById(
+            "pagination"
+        );
+
+    const searchButton =
+        document.getElementById(
+            "search-button"
+        );
+
+
+    /*
+     * Clear old result
+     */
+
+    status.className =
+        "status";
+
+    status.textContent =
+        "Searching...";
+
+
+    results.innerHTML =
+        '<div class="loading">Searching Archive...</div>';
+
+
+    resultInfo.innerHTML =
+        "";
+
+    filterSummary.innerHTML =
+        "";
+
+    pagination.innerHTML =
+        "";
+
+
+    searchButton.disabled =
+        true;
+
+
+    try {
+
+
+        /*
+         * Build query
+         */
+
+        const params =
+            buildSearchParams(
+                page
+            );
+
+
+        const url =
+            SEARCH_API +
+            "?" +
+            params.toString();
+
+
+        /*
+         * Request
+         */
+
+        const response =
+            await fetch(
+                url,
+                {
+                    method: "GET",
+                    headers: {
+                        "Accept":
+                            "application/json"
+                    }
+                }
+            );
+
+
+        /*
+         * Read raw response first.
+         *
+         * 不直接 response.json()
+         *
+         * 避免：
+         *
+         * Unexpected token '<'
+         */
+
+        const raw =
+            await response.text();
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(
+                    raw
+                );
+
+        }
+        catch (
+            jsonError
+        ) {
+
+            console.error(
+                "Invalid JSON response:",
+                raw
+            );
+
+
+            throw new Error(
+                "API 沒有回傳 JSON。"
+                +
+                " HTTP "
+                +
+                response.status
+            );
+
+        }
+
+
+        /*
+         * HTTP Error
+         */
+
+        if (!response.ok) {
+
+            const detail =
+                data.detail ||
+                data.message ||
+                "Search API request failed";
+
+
+            throw new Error(
+                detail
+            );
+
+        }
+
+
+        /*
+         * Render
+         */
+
+        renderSearchResults(
+            data
+        );
+
+
+        status.className =
+            "status success";
+
+
+        status.textContent =
+            "Search completed.";
+
+
+    }
+    catch (
+        error
+    ) {
+
+        console.error(
+            "Composite Search Error:",
+            error
+        );
+
+
+        status.className =
+            "status error";
+
+
+        status.textContent =
+            "Search failed: " +
+            error.message;
+
+
+        results.innerHTML =
+
+            '<div class="empty">' +
+
+            escapeHtml(
+                error.message
+            ) +
+
+            "</div>";
+
+    }
+    finally {
+
+        searchButton.disabled =
+            false;
+
+    }
+
+}
+
+
+
+/* ==================================================
+   Render Search Results
+   ================================================== */
+
+function renderSearchResults(
+    data
+) {
+
+    const resultsContainer =
+        document.getElementById(
+            "results"
+        );
+
+
+    const resultInfo =
+        document.getElementById(
+            "result-info"
+        );
+
+
+    const filterSummary =
+        document.getElementById(
+            "filter-summary"
+        );
+
+
+    /*
+     * Support:
+     *
+     * {
+     *   results: [],
+     *   total: 10,
+     *   page: 1,
+     *   page_size: 20,
+     *   filters: {}
+     * }
+     */
+
+    const items =
+        Array.isArray(
+            data.results
+        )
+            ? data.results
+            : [];
+
+
+    const total =
+        Number(
+            data.total || 0
+        );
+
+
+    const page =
+        Number(
+            data.page || 1
+        );
+
+
+    const pageSize =
+        Number(
+            data.page_size || 20
+        );
+
+
+    /*
+     * Result information
+     */
+
+    resultInfo.innerHTML =
+
+        "<span>" +
+        "Total: " +
+        escapeHtml(total) +
+        "</span>" +
+
+        "<span>" +
+        "Page: " +
+        escapeHtml(page) +
+        "</span>" +
+
+        "<span>" +
+        "Page Size: " +
+        escapeHtml(pageSize) +
+        "</span>";
+
+
+    /*
+     * Active filters
+     */
+
+    const filters =
+        data.filters || {};
+
+
+    const filterKeys =
+        Object.keys(
+            filters
+        );
+
+
+    if (
+        filterKeys.length > 0
+    ) {
+
+        filterSummary.innerHTML =
+
+            "Active Filters: " +
+
+            filterKeys
+                .map(
+                    function(key) {
+
+                        return (
+                            escapeHtml(
+                                key
+                            )
+                            +
+                            "="
+                            +
+                            escapeHtml(
+                                filters[key]
+                            )
+                        );
+
+                    }
+                )
+                .join(
+                    " | "
+                );
+
+    }
+    else {
+
+        filterSummary.innerHTML =
+            "Active Filters: None";
+
+    }
+
+
+    /*
+     * Empty
+     */
+
+    if (
+        items.length === 0
+    ) {
+
+        resultsContainer.innerHTML =
+
+            '<div class="empty">' +
+
+            "No archive articles found." +
+
+            "</div>";
+
+
+        renderPagination(
+            page,
+            pageSize,
+            total
+        );
+
+
+        return;
+
+    }
+
+
+    /*
+     * Render articles
+     */
+
+    resultsContainer.innerHTML =
+        items
+            .map(
+                renderArticle
+            )
+            .join(
+                ""
+            );
+
+
+    /*
+     * Pagination
+     */
+
+    renderPagination(
+        page,
+        pageSize,
+        total
+    );
+
+}
+
+
+
+/* ==================================================
+   Render Article
+   ================================================== */
+
+function renderArticle(
+    article
+) {
+
+    const title =
+        getValue(
+            article,
+            [
+                "title",
+                "name"
+            ]
+        )
+        || "Untitled Article";
+
+
+    const url =
+        getValue(
+            article,
+            [
+                "url",
+                "article_url"
+            ]
+        );
+
+
+    const source =
+        getValue(
+            article,
+            [
+                "source"
+            ]
+        );
+
+
+    const published =
+        getValue(
+            article,
+            [
+                "published",
+                "archive_date",
+                "crawl_time",
+                "created_at",
+                "date"
+            ]
+        );
+
+
+    const category =
+        getValue(
+            article,
+            [
+                "category",
+                "ai_category"
+            ]
+        );
+
+
+    const importance =
+        getValue(
+            article,
+            [
+                "importance",
+                "ai_importance"
+            ]
+        );
+
+
+    const content =
+        getValue(
+            article,
+            [
+                "content",
+                "summary"
+            ]
+        );
+
+
+    let titleHtml;
+
+
+    if (url) {
+
+        titleHtml =
+
+            '<a href="' +
+            escapeHtml(url) +
+            '" target="_blank" rel="noopener noreferrer">' +
+
+            escapeHtml(title) +
+
+            "</a>";
+
+    }
+    else {
+
+        titleHtml =
+            escapeHtml(title);
+
+    }
+
+
+    let badges = "";
+
+
+    if (source) {
+
+        badges +=
+
+            '<span class="badge source">' +
+
+            "Source: " +
+
+            escapeHtml(source) +
+
+            "</span>";
+
+    }
+
+
+    if (category) {
+
+        badges +=
+
+            '<span class="badge category">' +
+
+            "Category: " +
+
+            escapeHtml(category) +
+
+            "</span>";
+
+    }
+
+
+    if (
+        importance !== null &&
+        importance !== undefined
+    ) {
+
+        badges +=
+
+            '<span class="badge importance">' +
+
+            "Importance: " +
+
+            escapeHtml(importance) +
+
+            "</span>";
+
+    }
+
+
+    return `
+
+        <div class="result">
+
+            <div class="result-title">
+
+                ${titleHtml}
+
+            </div>
+
+
+            <div class="meta">
+
+                ${
+                    published
+                    ? "Date: " +
+                      escapeHtml(published)
+                    : ""
+                }
+
+            </div>
+
+
+            <div>
+
+                ${badges}
+
+            </div>
+
+
+            ${
+                content
+                ? `
+                    <div class="content">
+                        ${escapeHtml(content)}
+                    </div>
+                  `
+                : ""
+            }
+
+        </div>
+
+    `;
+
+}
+
+
+
+/* ==================================================
+   Pagination
+   ================================================== */
+
+function renderPagination(
+    page,
+    pageSize,
+    total
+) {
+
+    const pagination =
+        document.getElementById(
+            "pagination"
+        );
+
+
+    const totalPages =
+        Math.max(
+            1,
+            Math.ceil(
+                total /
+                pageSize
+            )
+        );
+
+
+    pagination.innerHTML =
+
+        `
+
+        <button
+            onclick="searchArchive(${page - 1})"
+            ${page <= 1 ? "disabled" : ""}
+        >
+            Previous
+        </button>
+
+
+        <span class="page-info">
+
+            Page
+            ${page}
+            /
+            ${totalPages}
+
+        </span>
+
+
+        <button
+            onclick="searchArchive(${page + 1})"
+            ${
+                page >= totalPages
+                    ? "disabled"
+                    : ""
+            }
+        >
+            Next
+        </button>
+
+        `;
+
+}
+
+
+
+/* ==================================================
+   Reset Search
+   ================================================== */
+
+function resetSearch() {
+
+
+    const fields = [
+
+        "keyword",
+
+        "source",
+
+        "category",
+
+        "date_from",
+
+        "date_to",
+
+        "year",
+
+        "month",
+
+        "importance_min",
+
+        "importance_max"
+
+    ];
+
+
+    fields.forEach(
+        function(field) {
+
+            const element =
+                document.getElementById(
+                    field
+                );
+
+
+            if (element) {
+
+                element.value =
+                    "";
+
+            }
+
+        }
+    );
+
+
+    document.getElementById(
+        "page_size"
+    ).value =
+        "20";
+
+
+    document.getElementById(
+        "status"
+    ).textContent =
+        "";
+
+
+    document.getElementById(
+        "result-info"
+    ).innerHTML =
+        "";
+
+
+    document.getElementById(
+        "filter-summary"
+    ).innerHTML =
+        "";
+
+
+    document.getElementById(
+        "results"
+    ).innerHTML =
+
+        '<div class="empty">' +
+
+        "請輸入搜尋條件。" +
+
+        "</div>";
+
+
+    document.getElementById(
+        "pagination"
+    ).innerHTML =
+        "";
+
+}
+
+
+
+/* ==================================================
+   Initial State
+   ================================================== */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function() {
+
+        document.getElementById(
+            "results"
+        ).innerHTML =
+
+            '<div class="empty">' +
+
+            "請輸入搜尋條件後按 Search。" +
+
+            "</div>";
+
+    }
+);
+
+
+</script>
+
+
+</body>
+
+</html>

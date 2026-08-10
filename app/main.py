@@ -1,576 +1,242 @@
 """
 app/main.py
 
-AutoSearch_V3
+AutoSearch V4
 
-P4.3
-
-主流程控制
-
+P2.2.6 Async AI Pipeline
 
 Pipeline:
 
 Keyword
-
 ↓
-
+ArticleService
+↓
 Search
-
 ↓
-
 Download HTML
-
 ↓
-
 Parser
-
 ↓
-
-Article
-
+ArticleRepository
 ↓
-
-AI Analyzer
-
+articles
 ↓
-
-AIAnalysis
-
+AITaskRepository
 ↓
-
-MySQL
-
+ai_tasks WAITING
 ↓
-
-Excel
+AI Scheduler
+↓
+AI Worker
+↓
+AI Analysis
+↓
+Knowledge Archive
+↓
+Knowledge Intelligence
+↓
+Search Index
+↓
+ai_tasks DONE
 
 """
-
 
 
 # ======================================
 # Config
 # ======================================
 
-
 from config.keywords import SEARCH_KEYWORDS
 
 
-from config.settings import (
-    MAX_RESULTS,
-    HEADERS
+# ======================================
+# Services
+# ======================================
+
+from services.article_service import ArticleService
+
+from services.ai_scheduler import AIScheduler
+
+from services.knowledge_intelligence_service import (
+    KnowledgeIntelligenceService
 )
 
 
-
-
 # ======================================
-# Database
+# Export
 # ======================================
-
-
-from database.article_repository import (
-    ArticleRepository
-)
-
-
-
-
-
-# ======================================
-# AI
-# ======================================
-
-
-from ai.analyzer import (
-    AIAnalyzer
-)
-
-
-from models.ai_analysis import (
-    AIAnalysis
-)
-
-
-
-
-
-
-# ======================================
-# Core Modules
-# ======================================
-
-
-from search.search_engine import search
-
-
-from crawler.crawler import download
-
-
-from parser.parser import parse
-
 
 from exporter.excel import export
-
-
-
-
-
 
 
 # ======================================
 # Utils
 # ======================================
 
-
-from utils.hash import (
-    generate_hash
-)
-
-
-from utils.duplicate import (
-    is_duplicate,
-    save_document
-)
-
-
-from utils.history import (
-    save_history
-)
-
+from utils.history import save_history
 
 from utils.logger import logger
 
 
 
+class AutoSearchApplication:
+
+
+    def __init__(self):
+
+
+        # Article Pipeline
+
+        self.article_service = (
+            ArticleService()
+        )
+
+
+        # AI Pipeline
+
+        self.ai_scheduler = (
+            AIScheduler()
+        )
+
+
+        # Knowledge Layer
+
+        self.knowledge_service = (
+            KnowledgeIntelligenceService()
+        )
 
 
 
+    # ==================================
+    #
+    # Main Pipeline
+    #
+    # ==================================
+
+    def run(self):
+
+
+        logger.info(
+            "========== AutoSearch V4 Start =========="
+        )
+
+
+        articles = []
 
 
 
-
-def main():
-
-
-
-    logger.info(
-        "========== AutoSearch V3 Start =========="
-    )
+        try:
 
 
 
-    articles = []
+            # ==================================
+            #
+            # Step 1
+            #
+            # Article Collection
+            #
+            # Search
+            # Crawl
+            # Parser
+            # Save Article
+            # Create AI Task
+            #
+            # ==================================
+
+
+            for keyword in SEARCH_KEYWORDS:
+
+
+                logger.info(
+                    f"開始搜尋：{keyword}"
+                )
 
 
 
-    repo = ArticleRepository()
+                result = (
+                    self.article_service.create(
+                        keyword
+                    )
+                )
 
 
 
-    ai_analyzer = AIAnalyzer()
+                if result:
+
+
+                    articles.extend(
+                        result["articles"]
+                    )
 
 
 
+                save_history(
 
+                    keyword,
 
+                    result.get(
+                        "total",
+                        0
+                    ),
 
+                    result.get(
+                        "new",
+                        0
+                    ),
 
-    try:
+                    result.get(
+                        "duplicate",
+                        0
+                    ),
 
+                    result.get(
+                        "failed",
+                        0
+                    )
 
-
-        # ==================================
-        # Keyword Loop
-        # ==================================
-
-
-        for keyword in SEARCH_KEYWORDS:
+                )
 
 
 
             logger.info(
 
-                f"開始搜尋：{keyword}"
+                f"Articles collected={len(articles)}"
 
             )
 
 
 
-            search_results = search(
 
-                keyword,
 
-                MAX_RESULTS
+            # ==================================
+            #
+            # Step 2
+            #
+            # Async AI Pipeline
+            #
+            # ai_tasks WAITING
+            #
+            # ==================================
+
+
+            logger.info(
+
+                "Start Async AI Pipeline"
 
             )
 
 
+            ai_result = (
 
-            new_count = 0
+                self.ai_scheduler
+                .run_once()
 
-            duplicate_count = 0
+            )
 
-            failed_count = 0
 
+            logger.info(
 
-
-
-
-
-
-            # ==================================
-            # Article Loop
-            # ==================================
-
-
-            for item in search_results:
-
-
-
-                try:
-
-
-
-                    logger.info(
-
-                        f"處理文章：{item.title}"
-
-                    )
-
-
-
-                    url = item.url
-
-
-
-
-
-
-                    # ==========================
-                    # Download
-                    # ==========================
-
-
-                    html = download(
-
-                        url,
-
-                        HEADERS
-
-                    )
-
-
-
-                    if html is None:
-
-
-
-                        failed_count += 1
-
-
-                        logger.warning(
-
-                            f"Download failed: {url}"
-
-                        )
-
-
-                        continue
-
-
-
-
-
-
-
-                    # ==========================
-                    # Parser
-                    # ==========================
-
-
-                    article = parse(
-
-                        html,
-
-                        keyword
-
-                    )
-
-
-
-                    if article is None:
-
-
-
-                        failed_count += 1
-
-
-                        continue
-
-
-
-
-
-
-
-                    # ==========================
-                    # Search Metadata
-                    # ==========================
-
-
-                    article.keyword = item.keyword
-
-
-                    article.title = item.title
-
-
-                    article.url = item.url
-
-
-                    article.published = item.published
-
-
-                    article.source = item.source
-
-
-                    article.status = "Success"
-
-
-
-
-
-
-
-
-                    # ==========================
-                    # Document ID
-                    # ==========================
-
-
-                    article.document_id = generate_hash(
-
-                        article.title,
-
-                        article.content
-
-                    )
-
-
-
-
-
-
-
-
-
-                    # ==========================
-                    # Duplicate
-                    # ==========================
-
-
-                    if is_duplicate(
-
-                        article.document_id
-
-                    ):
-
-
-
-                        duplicate_count += 1
-
-
-
-                        logger.info(
-
-                            f"Duplicate: {article.title}"
-
-                        )
-
-
-                        continue
-
-
-
-
-
-
-
-                    save_document(
-
-                        article.document_id
-
-                    )
-
-
-                    new_count += 1
-
-
-
-
-
-
-
-
-
-
-
-                    # ==========================
-                    # AI Analysis P4.3
-                    #
-                    # 修正:
-                    #
-                    # 傳入 article.content
-                    #
-                    # ==========================
-
-
-                    try:
-
-
-
-                        analysis = ai_analyzer.analyze(
-
-                            article.content
-
-                        )
-
-
-
-                        article.ai_analysis = analysis
-
-
-
-
-
-
-                        # Debug
-
-                        print()
-
-                        print(
-                            "========== AI RESULT =========="
-                        )
-
-                        print(
-
-                            article.ai_analysis.to_dict()
-
-                        )
-
-                        print(
-                            "=============================="
-                        )
-
-                        print()
-
-
-
-
-
-                        logger.info(
-
-                            f"AI完成: {article.ai_analysis.category}"
-
-                        )
-
-
-
-
-
-
-                    except Exception as e:
-
-
-
-                        logger.error(
-
-                            f"AI Analysis Error: {e}"
-
-                        )
-
-
-                        article.ai_analysis = AIAnalysis()
-
-
-
-
-
-
-
-
-
-
-
-
-                    # ==========================
-                    # Database
-                    # ==========================
-
-
-                    result = repo.save(
-
-                        article
-
-                    )
-
-
-                    logger.info(
-
-                        f"Database Save: {result}"
-
-                    )
-
-
-
-                    articles.append(
-
-                        article
-
-                    )
-
-
-
-
-
-
-
-                except Exception as e:
-
-
-
-                    failed_count += 1
-
-
-                    logger.exception(e)
-
-
-
-
-
-
-
-
-
-
-
-
-            # ==================================
-            # History
-            # ==================================
-
-
-            save_history(
-
-                keyword,
-
-                len(search_results),
-
-                new_count,
-
-                duplicate_count,
-
-                failed_count
+                f"AI Pipeline finished={ai_result}"
 
             )
 
@@ -579,56 +245,97 @@ def main():
 
 
 
+            # ==================================
+            #
+            # Step 3
+            #
+            # Knowledge Intelligence
+            #
+            # ==================================
+
+
+            logger.info(
+
+                "Start Knowledge Intelligence"
+
+            )
+
+
+            self.knowledge_service.run()
 
 
 
-    finally:
+            logger.info(
 
+                "Knowledge Intelligence finished"
 
-
-        repo.close()
-
-
-
-
-
-
-
-
-
-
-    # ======================================
-    # Excel Export
-    # ======================================
-
-
-    if articles:
-
-
-
-        export(
-
-            articles
-
-        )
+            )
 
 
 
 
 
-    logger.info(
+        except Exception as e:
 
-        "========== AutoSearch V3 Finish =========="
 
-    )
-
+            logger.exception(e)
 
 
 
 
+        finally:
 
 
 
+            logger.info(
+
+                "========== AutoSearch V4 Finish =========="
+
+            )
+
+
+
+
+
+        # ==================================
+        #
+        # Export
+        #
+        # ==================================
+
+
+        if articles:
+
+
+            export(
+
+                articles
+
+            )
+
+
+
+        return articles
+
+
+
+
+
+
+# ======================================
+#
+# Backward Compatible Entry
+#
+# ======================================
+
+
+def main():
+
+
+    app = AutoSearchApplication()
+
+
+    app.run()
 
 
 

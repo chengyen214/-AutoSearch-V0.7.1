@@ -1,9 +1,9 @@
 """
-ai_analysis.py
+models/ai_analysis.py
 
-AutoSearch V3
+AutoSearch V4
 
-P4.4.3
+P4.4.3 + P1.6 + P2.2.5
 
 AI Analysis Result Model
 
@@ -15,24 +15,28 @@ AI Analysis Result Model
 
 支援:
 
+    - Article Relation
     - Summary
     - Category
     - Keywords
     - Importance
     - AI Metadata
+    - Entity Extraction
+    - Relation Extraction
+    - Async AI Pipeline Status
 
 
 Database:
 
-    MySQL articles table
+    ai_analysis table
 
 
 Future:
 
-    - OpenAI API
     - LangChain
     - Vector Database
     - RAG
+    - Knowledge Graph
 
 """
 
@@ -47,7 +51,6 @@ import json
 
 
 
-
 class AIAnalysis:
     """
     AI 分析結果模型
@@ -56,30 +59,15 @@ class AIAnalysis:
 
 
     def __init__(
+
         self,
 
-        summary: str = "",
-
-        category: str = "",
-
-        keywords: List[str] = None,
-
-        importance: int = 0,
-
 
         # ==========================
-        # P4.4.3 AI Metadata
+        # Article Relation
         # ==========================
 
-        ai_model: str = "RuleBased-V3",
-
-        ai_version: str = "3.0",
-
-        confidence: float = 0.9,
-
-        analyze_time=None
-
-    ):
+        article_id=None,
 
 
 
@@ -87,6 +75,87 @@ class AIAnalysis:
         # Basic AI Result
         # ==========================
 
+        summary: str = "",
+
+
+        category: str = "",
+
+
+        keywords: List[str] = None,
+
+
+        importance: int = 0,
+
+
+
+        # ==========================
+        # Knowledge Extraction
+        # P2.2.5
+        # ==========================
+
+        entities: List[str] = None,
+
+
+        relations: List[str] = None,
+
+
+
+        # ==========================
+        # AI Metadata
+        # ==========================
+
+        ai_model: str = "RuleBased-V3",
+
+
+        ai_version: str = "4.0",
+
+
+        confidence: float = 0.9,
+
+
+        analyze_time=None,
+
+
+
+        # ==========================
+        # Async Pipeline
+        # P2.2.5
+        # ==========================
+
+        status: str = "pending",
+
+
+        error_message: str = "",
+
+
+
+        id=None
+
+    ):
+
+
+
+        # ==========================
+        # ID
+        # ==========================
+
+        self.id = id
+
+
+
+        # ==========================
+        # Article Relation
+        # ==========================
+
+        self.article_id = article_id
+
+
+
+
+
+        # ==========================
+        # Basic AI Result
+        # ==========================
 
         self.summary = summary
 
@@ -117,10 +186,43 @@ class AIAnalysis:
 
 
 
+
+
+        # ==========================
+        # Knowledge Extraction
+        # ==========================
+
+        self.entities = (
+
+            entities
+
+            if entities is not None
+
+            else []
+
+        )
+
+
+
+        self.relations = (
+
+            relations
+
+            if relations is not None
+
+            else []
+
+        )
+
+
+
+
+
+
+
         # ==========================
         # AI Metadata
         # ==========================
-
 
         self.ai_model = ai_model
 
@@ -153,29 +255,47 @@ class AIAnalysis:
 
 
 
+        # ==========================
+        # Async Pipeline
+        # ==========================
+
+        self.status = status
+
+
+        self.error_message = error_message
+
+
+
+
+
 
 
     # ==================================================
     # Object -> Dictionary
     # ==================================================
 
-
     def to_dict(
+
         self
+
     ) -> Dict:
-        """
-        Object轉Dictionary
 
-        用於:
-
-        - MySQL
-        - API
-        - Debug
-
-        """
 
 
         return {
+
+
+
+            "id":
+
+                self.id,
+
+
+
+            "article_id":
+
+                self.article_id,
+
 
 
             "summary":
@@ -183,14 +303,17 @@ class AIAnalysis:
                 self.summary,
 
 
+
             "category":
 
                 self.category,
 
 
+
             "keywords":
 
                 self.keywords,
+
 
 
             "importance":
@@ -199,9 +322,22 @@ class AIAnalysis:
 
 
 
+            "entities":
+
+                self.entities,
+
+
+
+            "relations":
+
+                self.relations,
+
+
+
             "ai_model":
 
                 self.ai_model,
+
 
 
             "ai_version":
@@ -209,20 +345,31 @@ class AIAnalysis:
                 self.ai_version,
 
 
+
+            "confidence":
+
+                self.confidence,
+
+
+
             "analyze_time":
 
                 self.analyze_time,
 
 
-            "confidence":
 
-                self.confidence
+            "status":
+
+                self.status,
+
+
+
+            "error_message":
+
+                self.error_message
 
 
         }
-
-
-
 
 
 
@@ -234,13 +381,12 @@ class AIAnalysis:
     # Object -> JSON
     # ==================================================
 
-
     def to_json(
+
         self
+
     ) -> str:
-        """
-        JSON輸出
-        """
+
 
 
         data = self.to_dict()
@@ -256,6 +402,7 @@ class AIAnalysis:
         ):
 
 
+
             data["analyze_time"] = (
 
                 data["analyze_time"]
@@ -267,6 +414,7 @@ class AIAnalysis:
                 )
 
             )
+
 
 
 
@@ -285,27 +433,44 @@ class AIAnalysis:
 
 
 
-
-
-
-
     # ==================================================
     # Dictionary -> Object
     # ==================================================
 
-
     @classmethod
+
     def from_dict(
+
         cls,
+
         data: Dict
+
     ):
-        """
-        Dictionary建立AIAnalysis
-        """
 
 
 
         return cls(
+
+
+
+            id=data.get(
+
+                "id",
+
+                None
+
+            ),
+
+
+
+            article_id=data.get(
+
+                "article_id",
+
+                None
+
+            ),
+
 
 
             summary=data.get(
@@ -348,6 +513,26 @@ class AIAnalysis:
 
 
 
+            entities=data.get(
+
+                "entities",
+
+                []
+
+            ),
+
+
+
+            relations=data.get(
+
+                "relations",
+
+                []
+
+            ),
+
+
+
             ai_model=data.get(
 
                 "ai_model",
@@ -384,11 +569,30 @@ class AIAnalysis:
 
                 None
 
+            ),
+
+
+
+            status=data.get(
+
+                "status",
+
+                "pending"
+
+            ),
+
+
+
+            error_message=data.get(
+
+                "error_message",
+
+                ""
+
             )
 
+
         )
-
-
 
 
 
@@ -400,30 +604,88 @@ class AIAnalysis:
     # Validation
     # ==================================================
 
-
     def is_valid(
+
         self
+
     ) -> bool:
-        """
-        AI結果有效性檢查
-        """
+
 
 
         return bool(
 
+
+
             self.summary
 
+
             or
+
 
             self.category
 
+
             or
 
+
             self.keywords
+
+
+            or
+
+
+            self.entities
+
 
         )
 
 
+
+
+
+
+
+    # ==================================================
+    # Pipeline Status
+    # ==================================================
+
+    def mark_completed(
+
+        self
+
+    ):
+
+
+
+        self.status = "completed"
+
+
+        self.error_message = ""
+
+
+
+
+
+
+
+    def mark_failed(
+
+        self,
+
+        error
+
+    ):
+
+
+
+        self.status = "failed"
+
+
+        self.error_message = str(
+
+            error
+
+        )
 
 
 
@@ -435,25 +697,45 @@ class AIAnalysis:
     # Display
     # ==================================================
 
-
     def __repr__(
+
         self
+
     ):
+
 
 
         return (
 
             "AIAnalysis("
 
+
+            f"id={self.id}, "
+
+
+            f"article_id={self.article_id}, "
+
+
             f"category={self.category}, "
+
 
             f"importance={self.importance}, "
 
+
             f"keywords={len(self.keywords)}, "
+
+
+            f"entities={len(self.entities)}, "
+
+
+            f"status={self.status}, "
+
 
             f"model={self.ai_model}, "
 
+
             f"confidence={self.confidence}"
+
 
             ")"
 
