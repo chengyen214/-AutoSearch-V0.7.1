@@ -3,7 +3,10 @@ services/article_service.py
 
 AutoSearch V4
 
-P2.3 Run Flow Archive History Integration
+P2.4.2
+
+Article Service
+Archive History + AI Task Batch Trigger Integration
 
 功能:
 
@@ -14,6 +17,7 @@ P2.3 Run Flow Archive History Integration
 - History Detection
 - Article Query
 - AI Task Trigger
+- AI Task Batch Trigger
 
 Pipeline:
 
@@ -40,6 +44,17 @@ ArchiveService
 AITaskRepository
 ↓
 ai_tasks WAITING
+↓
+AIBatchTriggerService
+↓
+WAITING >= 50
+↓
+AIScheduler
+↓
+AIWorker
+↓
+Async AI Analysis
+
 
 Archive History:
 
@@ -54,12 +69,18 @@ Same URL + Same HTML
 Existing Article
 ↓
 No New Version
+↓
+No AI Task
 
 Same URL + Changed HTML
 ↓
 Existing Article
 ↓
 Version 2
+↓
+AI Task WAITING
+↓
+Batch Trigger Check
 ↓
 Version 3
 ↓
@@ -68,45 +89,58 @@ Version 3
 
 import hashlib
 
+
 from config.settings import (
     MAX_RESULTS,
     HEADERS
 )
 
+
 from database.article_repository import (
     ArticleRepository
 )
+
 
 from database.ai_task_repository import (
     AITaskRepository
 )
 
+
 from models.ai_task import (
     AITask
 )
+
 
 from search.search_engine import (
     search
 )
 
+
 from crawler.crawler import (
     download
 )
+
 
 from parser.parser import (
     parse
 )
 
+
 from utils.hash import (
     generate_hash
 )
+
 
 from utils.duplicate import (
     is_duplicate,
     save_document
 )
 
-from utils.logger import logger
+
+from utils.logger import (
+    logger
+)
+
 
 # ======================================
 #
@@ -118,48 +152,116 @@ from services.archive_service import (
     ArchiveService
 )
 
+
 from archive.archive_integration import (
     ArchiveIntegration
 )
 
 
+# ======================================
+#
+# AI Batch Trigger
+#
+# P2.4.2
+#
+# ======================================
+
+from services.ai_batch_trigger_service import (
+    AIBatchTriggerService
+)
+
+
 class ArticleService:
 
-    # ==================================
+    """
+    Article Service
+
+    P2.4.2
+
+    負責:
+
+        Article Collection
+        Archive History
+        AI Task Creation
+        AI Batch Trigger
+
+    不負責:
+
+        AI Analysis
+        AI Worker
+        Knowledge Processing
+    """
+
+    # ==================================================
+    #
     # Initialize
-    # ==================================
+    #
+    # ==================================================
 
-    def __init__(self):
+    def __init__(
+        self,
+        repo=None,
+        task_repo=None,
+        archive_service=None,
+        archive_integration=None,
+        batch_trigger=None
+    ):
 
         # ==================================
-        # Repository
+        #
+        # Article Repository
+        #
         # ==================================
 
-        self.repo = ArticleRepository()
+        if repo is None:
 
-        self.task_repo = AITaskRepository()
+            repo = ArticleRepository()
+
+        self.repo = repo
+
 
         # ==================================
+        #
+        # AI Task Repository
+        #
+        # ==================================
+
+        if task_repo is None:
+
+            task_repo = AITaskRepository()
+
+        self.task_repo = task_repo
+
+
+        # ==================================
+        #
         # Archive Service
         #
-        # 負責：
+        # 負責:
         #
         # 1. HTML Snapshot
         # 2. RawDocument
         # 3. ArchiveVersion
         # 4. Version Number
+        #
         # ==================================
+
+        if archive_service is None:
+
+            archive_service = ArchiveService()
 
         self.archive_service = (
-            ArchiveService()
+            archive_service
         )
 
+
         # ==================================
+        #
         # Archive Integration
         #
         # P2.3
         #
-        # 負責：
+        # 負責:
         #
         # 1. History Detection
         # 2. Timeline
@@ -167,19 +269,50 @@ class ArticleService:
         # 4. Diff
         # 5. Knowledge History
         #
-        # 注意：
-        #
-        # archive_versions 目前由
-        # ArchiveVersionRepository 管理。
         # ==================================
 
-        self.archive_integration = (
-            ArchiveIntegration(
-                archive_repository=(
-                    self.archive_service.version_repo
+        if archive_integration is None:
+
+            archive_integration = (
+                ArchiveIntegration(
+                    archive_repository=(
+                        self.archive_service
+                        .version_repo
+                    )
                 )
             )
+
+        self.archive_integration = (
+            archive_integration
         )
+
+
+        # ==================================
+        #
+        # AI Batch Trigger
+        #
+        # P2.4.2
+        #
+        # 預設:
+        #
+        # WAITING >= 50
+        #
+        # ==================================
+
+        if batch_trigger is None:
+
+            batch_trigger = (
+                AIBatchTriggerService(
+                    task_repository=(
+                        self.task_repo
+                    )
+                )
+            )
+
+        self.batch_trigger = (
+            batch_trigger
+        )
+
 
     # ==================================================
     #
@@ -194,17 +327,12 @@ class ArticleService:
         """
         依 URL 找出既有 Article。
 
-        優先使用 Repository 的：
+        優先使用 Repository:
 
             find_by_url()
 
         若目前 Repository 尚未提供，
-        則 fallback 到 find_all()。
-
-        Returns
-        -------
-
-        Article / dict / None
+        fallback 到 find_all()。
         """
 
         try:
@@ -221,6 +349,7 @@ class ArticleService:
                 return self.repo.find_by_url(
                     url
                 )
+
 
             # ==================================
             # Fallback
@@ -266,6 +395,7 @@ class ArticleService:
 
         return None
 
+
     # ==================================================
     #
     # Get Article ID
@@ -284,6 +414,7 @@ class ArticleService:
 
             return None
 
+
         if isinstance(
             article,
             dict
@@ -293,11 +424,13 @@ class ArticleService:
                 "id"
             )
 
+
         return getattr(
             article,
             "id",
             None
         )
+
 
     # ==================================================
     #
@@ -318,20 +451,15 @@ class ArticleService:
             open(..., "w", encoding="utf-8")
             f.write(html)
 
-        因此實際落盤內容為：
+        因此實際落盤內容為:
 
             html.encode("utf-8")
-
-        這裡直接使用相同方式計算 SHA256。
-
-        用途：
-
-            Run Flow History Detection
         """
 
         if html is None:
 
             html = ""
+
 
         if not isinstance(
             html,
@@ -340,9 +468,11 @@ class ArticleService:
 
             html = str(html)
 
+
         return hashlib.sha256(
             html.encode("utf-8")
         ).hexdigest()
+
 
     # ==================================================
     #
@@ -355,11 +485,8 @@ class ArticleService:
         article_id
     ):
         """
-        透過 ArchiveIntegration 取得最新
-        Archive Version。
-
-        ArchiveIntegration 的 Repository
-        使用 ArchiveVersionRepository。
+        透過 ArchiveIntegration
+        取得最新 Archive Version。
         """
 
         try:
@@ -369,9 +496,11 @@ class ArticleService:
                 ._get_archive_repository()
             )
 
+
             if repository is None:
 
                 return None
+
 
             # ==================================
             # ArchiveVersionRepository API
@@ -382,9 +511,13 @@ class ArticleService:
                 "get_latest_version"
             ):
 
-                return repository.get_latest_version(
-                    article_id
+                return (
+                    repository
+                    .get_latest_version(
+                        article_id
+                    )
                 )
+
 
             # ==================================
             # Compatibility
@@ -395,8 +528,11 @@ class ArticleService:
                 "get_latest"
             ):
 
-                return repository.get_latest(
-                    article_id
+                return (
+                    repository
+                    .get_latest(
+                        article_id
+                    )
                 )
 
         except Exception as e:
@@ -407,6 +543,7 @@ class ArticleService:
             )
 
         return None
+
 
     # ==================================================
     #
@@ -423,31 +560,14 @@ class ArticleService:
         判斷 Article 是否需要建立新的
         Archive Version。
 
-        使用：
+        使用:
 
             HTML SHA256
             ↓
             latest archive_versions.file_hash
             ↓
             比較
-
-        Returns
-        -------
-
-        dict
-
-        {
-            "exists": True / False,
-            "changed": True / False,
-            "latest_version": ...,
-            "latest_version_number": ...,
-            "file_hash": ...
-        }
         """
-
-        # ==================================
-        # Calculate Current HTML Hash
-        # ==================================
 
         file_hash = (
             self._get_html_hash(
@@ -455,17 +575,13 @@ class ArticleService:
             )
         )
 
-        # ==================================
-        # Get Latest Version
-        #
-        # 透過 ArchiveIntegration
-        # ==================================
 
         latest = (
             self._get_latest_archive_version(
                 article_id
             )
         )
+
 
         # ==================================
         # No History
@@ -487,6 +603,7 @@ class ArticleService:
 
             }
 
+
         # ==================================
         # Existing History
         # ==================================
@@ -497,15 +614,18 @@ class ArticleService:
             None
         )
 
+
         changed = (
             old_hash != file_hash
         )
+
 
         latest_version_number = getattr(
             latest,
             "version_number",
             None
         )
+
 
         return {
 
@@ -522,6 +642,65 @@ class ArticleService:
             "file_hash": file_hash
 
         }
+
+
+    # ==================================================
+    #
+    # Trigger AI Batch
+    #
+    # P2.4.2
+    #
+    # ==================================================
+
+    def _trigger_ai_batch(
+        self
+    ):
+        """
+        檢查 WAITING AI Task 數量。
+
+        當:
+
+            WAITING >= 50
+
+        時:
+
+            AIBatchTriggerService
+                    ↓
+            AIScheduler.start()
+                    ↓
+            AIWorker
+
+        注意:
+
+        這裡只負責通知 Batch Trigger。
+
+        不直接啟動 Worker。
+        """
+
+        try:
+
+            result = (
+                self.batch_trigger
+                .check_and_trigger()
+            )
+
+
+            logger.info(
+                "AI Batch Trigger checked: "
+                f"triggered={result}"
+            )
+
+
+            return result
+
+        except Exception as e:
+
+            logger.exception(
+                f"AI Batch Trigger error: {e}"
+            )
+
+            return False
+
 
     # ==================================================
     #
@@ -541,6 +720,7 @@ class ArticleService:
         duplicate = 0
         failed = 0
 
+
         try:
 
             # ==================================
@@ -552,7 +732,11 @@ class ArticleService:
                 MAX_RESULTS
             )
 
-            total = len(results)
+
+            total = len(
+                results
+            )
+
 
             # ==================================
             # Process Results
@@ -566,6 +750,7 @@ class ArticleService:
                         f"Processing {item.title}"
                     )
 
+
                     # ==================================
                     # Download
                     # ==================================
@@ -574,6 +759,7 @@ class ArticleService:
                         item.url,
                         HEADERS
                     )
+
 
                     if html is None:
 
@@ -585,6 +771,7 @@ class ArticleService:
 
                         continue
 
+
                     # ==================================
                     # Parser
                     # ==================================
@@ -593,6 +780,7 @@ class ArticleService:
                         html,
                         keyword
                     )
+
 
                     if article is None:
 
@@ -603,6 +791,7 @@ class ArticleService:
                         )
 
                         continue
+
 
                     # ==================================
                     # Article Metadata
@@ -620,6 +809,7 @@ class ArticleService:
 
                     article.status = "Success"
 
+
                     # ==================================
                     # Document ID
                     # ==================================
@@ -631,6 +821,7 @@ class ArticleService:
                         )
                     )
 
+
                     # ==================================
                     #
                     # Find Existing Article By URL
@@ -638,24 +829,22 @@ class ArticleService:
                     # History Detection 必須優先於
                     # Document Duplicate Detection。
                     #
-                    # 原因：
-                    #
-                    # 同 URL + Changed Content
-                    # document_id 一定會不同。
-                    #
                     # ==================================
 
                     existing_article = (
-                        self._find_existing_article_by_url(
+                        self
+                        ._find_existing_article_by_url(
                             item.url
                         )
                     )
+
 
                     existing_article_id = (
                         self._get_article_id(
                             existing_article
                         )
                     )
+
 
                     # ==================================
                     #
@@ -671,16 +860,19 @@ class ArticleService:
                             f"url={item.url}"
                         )
 
+
                         # ==================================
                         # History Detection
                         # ==================================
 
                         history_result = (
-                            self._check_archive_history(
+                            self
+                            ._check_archive_history(
                                 existing_article_id,
                                 html
                             )
                         )
+
 
                         # ==================================
                         #
@@ -703,13 +895,14 @@ class ArticleService:
                                 f"url={item.url}"
                             )
 
-                            # 不建立：
+                            # 不建立:
                             #
                             # Article
                             # Version
                             # AI Task
                             #
                             continue
+
 
                         # ==================================
                         #
@@ -725,11 +918,10 @@ class ArticleService:
                             f"{history_result['latest_version_number']}"
                         )
 
+
                         # ==================================
                         #
                         # Save New Document Hash
-                        #
-                        # Changed content 是新的 Document
                         #
                         # ==================================
 
@@ -741,18 +933,10 @@ class ArticleService:
                                 article.document_id
                             )
 
+
                         # ==================================
                         #
                         # Save New Archive Version
-                        #
-                        # 使用原 Article ID
-                        #
-                        # ArchiveService 會：
-                        #
-                        # 1. 儲存 HTML
-                        # 2. 建立 RawDocument
-                        # 3. 取得 Next Version Number
-                        # 4. 建立 ArchiveVersion
                         #
                         # ==================================
 
@@ -770,6 +954,7 @@ class ArticleService:
                             )
                         )
 
+
                         if archive_version is None:
 
                             failed += 1
@@ -781,6 +966,7 @@ class ArticleService:
                             )
 
                             continue
+
 
                         # ==================================
                         #
@@ -796,6 +982,7 @@ class ArticleService:
                             f"{archive_version.version_number}"
                         )
 
+
                         # ==================================
                         #
                         # Create AI Task
@@ -809,6 +996,7 @@ class ArticleService:
                             existing_article_id
                         )
 
+
                         if task is None:
 
                             logger.warning(
@@ -817,11 +1005,23 @@ class ArticleService:
                                 f"{existing_article_id}"
                             )
 
+                        else:
+
+                            # ==================================
+                            #
+                            # P2.4.2 Batch Trigger
+                            #
+                            # AI Task 成功建立後
+                            # 檢查 WAITING Queue。
+                            #
+                            # ==================================
+
+                            self._trigger_ai_batch()
+
+
                         # ==================================
                         #
                         # Result
-                        #
-                        # 使用既有 Article
                         #
                         # ==================================
 
@@ -832,6 +1032,7 @@ class ArticleService:
                         new += 1
 
                         continue
+
 
                     # ==================================
                     #
@@ -846,11 +1047,10 @@ class ArticleService:
                         f"url={item.url}"
                     )
 
+
                     # ==================================
-                    # Document Duplicate Check
                     #
-                    # 只有 URL 不存在時才判斷
-                    # 是否為完全相同的 Document。
+                    # Document Duplicate Check
                     #
                     # ==================================
 
@@ -867,13 +1067,17 @@ class ArticleService:
 
                         continue
 
+
                     # ==================================
+                    #
                     # Save Document Hash
+                    #
                     # ==================================
 
                     save_document(
                         article.document_id
                     )
+
 
                     # ==================================
                     #
@@ -887,6 +1091,7 @@ class ArticleService:
                         article
                     )
 
+
                     if saved is None:
 
                         failed += 1
@@ -896,6 +1101,7 @@ class ArticleService:
                         )
 
                         continue
+
 
                     # ==================================
                     #
@@ -915,10 +1121,10 @@ class ArticleService:
                         )
                     )
 
+
                     # ==================================
                     #
                     # Archive 必須成功
-                    #
                     # 才建立 AI Task
                     #
                     # ==================================
@@ -937,6 +1143,7 @@ class ArticleService:
 
                         continue
 
+
                     # ==================================
                     #
                     # Archive Success
@@ -954,6 +1161,7 @@ class ArticleService:
 
                     )
 
+
                     # ==================================
                     #
                     # Create AI Task
@@ -964,6 +1172,7 @@ class ArticleService:
                         saved.id
                     )
 
+
                     if task is None:
 
                         logger.warning(
@@ -973,8 +1182,24 @@ class ArticleService:
 
                         )
 
+                    else:
+
+                        # ==================================
+                        #
+                        # P2.4.2 Batch Trigger
+                        #
+                        # 新 Article 建立 AI Task 後
+                        # 檢查 WAITING Queue。
+                        #
+                        # ==================================
+
+                        self._trigger_ai_batch()
+
+
                     # ==================================
+                    #
                     # Result
+                    #
                     # ==================================
 
                     articles.append(
@@ -983,6 +1208,7 @@ class ArticleService:
 
                     new += 1
 
+
                 except Exception as e:
 
                     failed += 1
@@ -990,6 +1216,7 @@ class ArticleService:
                     logger.exception(
                         f"Article processing error: {e}"
                     )
+
 
             # ==================================
             # Return
@@ -1009,11 +1236,13 @@ class ArticleService:
 
             }
 
+
         except Exception as e:
 
             logger.exception(
                 f"Article create error: {e}"
             )
+
 
             return {
 
@@ -1029,6 +1258,7 @@ class ArticleService:
 
             }
 
+
     # ==================================================
     #
     # Create AI Task
@@ -1039,6 +1269,19 @@ class ArticleService:
         self,
         article_id
     ):
+        """
+        建立 AI Analysis Task。
+
+        流程:
+
+            Article
+                ↓
+            AITask
+                ↓
+            WAITING
+                ↓
+            Batch Trigger
+        """
 
         try:
 
@@ -1056,16 +1299,30 @@ class ArticleService:
 
             )
 
+
             result = self.task_repo.insert(
                 task
             )
 
+
+            if result is None:
+
+                logger.warning(
+                    "AI Task insert returned None: "
+                    f"article={article_id}"
+                )
+
+                return None
+
+
             logger.info(
-                f"AI Task created "
+                "AI Task created "
                 f"article={article_id}"
             )
 
+
             return result
+
 
         except Exception as e:
 
@@ -1074,6 +1331,7 @@ class ArticleService:
             )
 
             return None
+
 
     # ==================================================
     #
@@ -1098,6 +1356,7 @@ class ArticleService:
 
             return []
 
+
     # ==================================================
 
     def get_by_id(
@@ -1116,6 +1375,7 @@ class ArticleService:
             logger.error(e)
 
             return None
+
 
     # ==================================================
 
@@ -1136,6 +1396,7 @@ class ArticleService:
 
             return []
 
+
     # ==================================================
 
     def get_by_source(
@@ -1155,6 +1416,7 @@ class ArticleService:
 
             return []
 
+
     # ==================================================
     #
     # AI Query
@@ -1170,6 +1432,7 @@ class ArticleService:
             level
         )
 
+
     # ==================================================
 
     def get_by_category(
@@ -1180,6 +1443,7 @@ class ArticleService:
         return self.repo.find_by_category(
             category
         )
+
 
     # ==================================================
 
@@ -1192,6 +1456,7 @@ class ArticleService:
             keyword
         )
 
+
     # ==================================================
 
     def get_ai_top(
@@ -1202,6 +1467,7 @@ class ArticleService:
         try:
 
             articles = self.repo.find_all()
+
 
             articles.sort(
 
@@ -1215,7 +1481,9 @@ class ArticleService:
 
             )
 
+
             return articles[:limit]
+
 
         except Exception as e:
 
@@ -1223,13 +1491,16 @@ class ArticleService:
 
             return []
 
+
     # ==================================================
     #
     # Count
     #
     # ==================================================
 
-    def count(self):
+    def count(
+        self
+    ):
 
         try:
 
@@ -1241,13 +1512,16 @@ class ArticleService:
 
             return 0
 
+
     # ==================================================
     #
     # Close
     #
     # ==================================================
 
-    def close(self):
+    def close(
+        self
+    ):
 
         try:
 

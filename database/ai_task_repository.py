@@ -205,6 +205,69 @@ class AITaskRepository:
         return tasks
 
     # ==================================================
+    # Count Waiting Tasks
+    # ==================================================
+
+    def count_waiting_tasks(
+        self
+    ):
+        """
+        取得目前 WAITING AI Task 數量。
+
+        P2.4.2
+
+        用於:
+
+            AIBatchTriggerService
+
+        不取得完整 Task。
+
+        直接使用:
+
+            SELECT COUNT(*)
+
+        提高 Queue Threshold
+        檢查效率。
+
+        Returns
+        -------
+
+        int
+
+            WAITING Task 數量
+        """
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        sql = """
+        SELECT COUNT(*) AS count
+        FROM ai_tasks
+        WHERE status='WAITING'
+        """
+
+        cursor.execute(sql)
+
+        row = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if row is None:
+            return 0
+
+        return int(
+            row.get(
+                "count",
+                0
+            )
+        )
+
+
+    # ==================================================
     # Claim Task
     # ==================================================
 

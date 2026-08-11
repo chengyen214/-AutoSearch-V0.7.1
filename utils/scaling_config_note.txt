@@ -1,0 +1,69 @@
+P2.4 Async AI Scaling Configuration
+
+目前測試設定：
+
+MAX_RESULTS
+位置：
+config/settings.py
+
+目前：
+70
+
+用途：
+控制每次 Search 最大結果數。
+
+----------------------------------------
+
+AI_THRESHOLD
+位置：
+services/ai_batch_trigger_service.py
+
+目前：
+40
+
+用途：
+WAITING AI Task 達到此數量後，
+觸發 Async AI Scaling。
+
+----------------------------------------
+
+未來正式環境調整時：
+
+1. 修改 config/settings.py
+   MAX_RESULTS
+
+2. 修改 services/ai_batch_trigger_service.py
+   threshold
+
+不要修改：
+ai/worker.py
+
+Worker 的 Batch Size 與 Threshold
+是不同概念。
+
+----------------------------------------
+
+P2.4 驗證目標：
+
+MAX_RESULTS = 70
+AI_THRESHOLD = 40
+
+預期：
+
+Search
+↓
+Article
+↓
+AI Tasks
+↓
+WAITING >= 40
+↓
+Batch Trigger
+↓
+AI Worker
+↓
+10 tasks / batch
+↓
+Queue 持續處理
+↓
+WAITING = 0

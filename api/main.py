@@ -5,18 +5,15 @@ AutoSearch V4
 
 FastAPI API + Web UI Layer
 
-
 功能:
 
 V2.5:
 
     Article API
 
-
 V3:
 
     AI Analysis Retrieval API
-
 
 V4 P1:
 
@@ -32,7 +29,6 @@ V4 P1:
     P1.7:
         Intelligent Search API
         Semantic Search API
-
 
 V4 P2:
 
@@ -55,6 +51,8 @@ V4 P2:
     P2.4.3:
         Composite Archive Search Web UI
 
+    P2.3:
+        Historical Search API
 
 Web UI:
 
@@ -67,18 +65,15 @@ Web UI:
     /archive/search
         Composite Archive Search
 
-
 Swagger:
 
     /docs
-
 
 Run:
 
     uvicorn api.main:app --reload
 
 """
-
 
 from fastapi import (
     FastAPI,
@@ -152,6 +147,12 @@ tags_metadata = [
     },
 
     {
+        "name": "Historical Search",
+        "description":
+            "Knowledge Archive Historical Search API"
+    },
+
+    {
         "name": "System",
         "description":
             "System Status API"
@@ -165,28 +166,19 @@ tags_metadata = [
 # ==================================
 
 from api.routes import (
-
     articles,
-
     knowledge,
-
     knowledge_ranking,
-
     intelligence,
-
     intelligent_search,
-
     semantic_search,
-
     hybrid_search,
-
     search_index,
-
     archive,
-
     archive_management
-
 )
+
+from api.routes import historical_search
 
 
 # ==================================
@@ -338,6 +330,8 @@ def api_root():
 
             "Knowledge Archive Management",
 
+            "Historical Search",
+
             "Composite Archive Search"
 
         ],
@@ -356,6 +350,9 @@ def api_root():
             "archive_search":
                 "/archive/search",
 
+            "historical_search":
+                "/historical-search",
+
             "archive_management":
                 "/management/archive"
 
@@ -373,9 +370,11 @@ def api_root():
 
 
 # ----------------------------------
+#
 # V2.5 + V3
 #
 # Article API
+#
 # ----------------------------------
 
 app.include_router(
@@ -384,9 +383,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P1.4
 #
 # Knowledge Retrieval API
+#
 # ----------------------------------
 
 app.include_router(
@@ -395,9 +396,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P1.5
 #
 # Knowledge Ranking API
+#
 # ----------------------------------
 
 app.include_router(
@@ -406,9 +409,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P1.6
 #
 # Knowledge Intelligence API
+#
 # ----------------------------------
 
 app.include_router(
@@ -417,9 +422,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P1.7
 #
 # Intelligent Search API
+#
 # ----------------------------------
 
 app.include_router(
@@ -428,9 +435,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P1.7
 #
 # Semantic Search API
+#
 # ----------------------------------
 
 app.include_router(
@@ -439,9 +448,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P2.1
 #
 # Hybrid Search API
+#
 # ----------------------------------
 
 app.include_router(
@@ -450,9 +461,11 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P2.2
 #
 # Search Index API
+#
 # ----------------------------------
 
 app.include_router(
@@ -461,11 +474,13 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P2.3.9
 #
 # Knowledge Archive API
 #
 # Knowledge Archive Web UI
+#
 # ----------------------------------
 
 app.include_router(
@@ -474,11 +489,26 @@ app.include_router(
 
 
 # ----------------------------------
+#
 # V4 P2.4.1
 #
 # Knowledge Archive Management API
+#
 # ----------------------------------
 
 app.include_router(
     archive_management.router
+)
+
+
+# ----------------------------------
+#
+# V4 P2.3
+#
+# Historical Search API
+#
+# ----------------------------------
+
+app.include_router(
+    historical_search.router
 )

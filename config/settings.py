@@ -3,10 +3,12 @@ AutoSearch 系統設定
 """
 
 # 搜尋設定
-MAX_RESULTS = 5
+MAX_RESULTS = 70
 
 # 網頁下載
-TIMEOUT = 15
+TIMEOUT = 7
+
+AI_THRESHOLD = 40
 
 HEADERS = {
     "User-Agent": (
