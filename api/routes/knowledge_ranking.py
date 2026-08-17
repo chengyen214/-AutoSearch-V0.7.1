@@ -3,7 +3,7 @@ api/routes/knowledge_ranking.py
 
 AutoSearch V4
 
-P1.5 Step 5
+P3.7
 
 Knowledge Ranking API Router
 
@@ -14,11 +14,36 @@ Knowledge Ranking API Router
 
 2. Score Filter
 
+3. Ranking API Validation
+
+4. OpenAPI Documentation
+
+
+API:
+
+GET /knowledge/ranking/top
+GET /knowledge/ranking/score/{score}
+
+
+Architecture:
+
+API
+ ↓
+KnowledgeRankingService
+ ↓
+KnowledgeScoreRepository
+ ↓
+knowledge_scores
+
 
 """
 
 
-from fastapi import APIRouter
+from fastapi import (
+    APIRouter,
+    Query,
+    Path
+)
 
 
 from services.knowledge_ranking_service import (
@@ -27,14 +52,30 @@ from services.knowledge_ranking_service import (
 
 
 
+
+
+# ==================================================
+# Router
+# ==================================================
+
+
 router = APIRouter(
 
     prefix="/knowledge/ranking",
 
-    tags=["Knowledge Ranking"]
+    tags=[
+        "Knowledge Ranking"
+    ]
 
 )
 
+
+
+
+
+# ==================================================
+# Service
+# ==================================================
 
 
 service = KnowledgeRankingService()
@@ -45,6 +86,21 @@ service = KnowledgeRankingService()
 
 # ==================================================
 # Top Ranking
+#
+# P3.7.1
+#
+# GET
+#
+# /knowledge/ranking/top
+#
+# Query:
+#
+# limit
+#
+# default = 10
+# minimum = 1
+# maximum = 100
+#
 # ==================================================
 
 
@@ -53,7 +109,20 @@ service = KnowledgeRankingService()
 )
 def top_ranking(
 
-    limit:int = 10
+    limit: int = Query(
+
+        10,
+
+        ge=1,
+
+        le=100,
+
+        description=(
+            "Maximum number of "
+            "ranking results"
+        )
+
+    )
 
 ):
 
@@ -69,6 +138,8 @@ def top_ranking(
 
         "success": True,
 
+        "limit": limit,
+
         "count": len(result),
 
         "data": result
@@ -79,11 +150,19 @@ def top_ranking(
 
 
 
-
-
-
 # ==================================================
 # Score Filter
+#
+# P3.7.2
+#
+# GET
+#
+# /knowledge/ranking/score/{score}
+#
+# score:
+#
+# ranking_score >= score
+#
 # ==================================================
 
 
@@ -92,12 +171,22 @@ def top_ranking(
 )
 def score_filter(
 
-    score:float
+    score: float = Path(
+
+        ...,
+
+        ge=0,
+
+        description=(
+            "Minimum ranking score"
+        )
+
+    )
 
 ):
 
 
-    result = service.repository.find_by_score(
+    result = service.find_by_score(
 
         score
 

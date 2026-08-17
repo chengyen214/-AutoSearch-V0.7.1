@@ -684,4 +684,4 @@ def test_archive_health(client):
 
     assert data["service"] == "archive"
 
-    assert data["version"] == "V4-P2.3.9"
+    assert data["version"] == "V4-P2.4.3"

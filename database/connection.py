@@ -2,7 +2,7 @@
 connection.py
 
 Database Connection
-AutoSearch V2.5
+AutoSearch V4
 """
 
 import mysql.connector
@@ -20,7 +20,13 @@ from config.database import (
 
 def get_connection():
     """
-    建立並回傳 MySQL Connection
+    建立並回傳 MySQL Connection。
+
+    Local:
+        HOST=localhost
+
+    Docker:
+        HOST=mysql
     """
 
     try:
@@ -45,6 +51,9 @@ def get_connection():
 
     except Error as e:
 
-        print(f"[Database Error] {e}")
+        print(
+            f"[Database Error] "
+            f"{e}"
+        )
 
         return None

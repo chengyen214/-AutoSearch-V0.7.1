@@ -3,29 +3,30 @@ services/knowledge_ranking_service.py
 
 AutoSearch V4
 
-P1.5 Step 4
+P3.7
 
 Knowledge Ranking Service
 
 
 功能:
 
-1. Knowledge Ranking
+1. Ranking Score Calculation
+2. Top Ranking Knowledge
+3. Score Filter
+4. Ranking Retrieval
+5. Knowledge Score Retrieval
+6. Score Update
 
-2. Top Knowledge Retrieval
 
-3. Score Calculation
-
-4. Score Update
-
-
-Layer:
+Architecture:
 
 API
- |
-Service
- |
-Repository
+ ↓
+KnowledgeRankingService
+ ↓
+KnowledgeScoreRepository
+ ↓
+knowledge_scores
 
 
 """
@@ -36,189 +37,219 @@ from database.knowledge_score_repository import (
 )
 
 
-
 class KnowledgeRankingService:
+    """
+    Knowledge Ranking Service
 
+    負責 Knowledge Ranking
+    與 Ranking Score 計算。
+    """
 
+    # ==================================================
+    # Initialization
+    # ==================================================
 
-    def __init__(self):
-
+    def __init__(
+        self,
+        repository=None
+    ):
 
         self.repository = (
-            KnowledgeScoreRepository()
-        )
 
+            repository
 
+            if repository is not None
 
-
-
-    # ==================================
-    # Top Ranking Knowledge
-    # ==================================
-
-
-    def get_top_ranking(
-
-        self,
-
-        limit=10
-
-    ):
-
-
-        """
-        取得最高 Ranking Knowledge
-
-        """
-
-
-        return self.repository.top_ranking(
-
-            limit
+            else KnowledgeScoreRepository()
 
         )
 
-
-
-
-
-
-
-    # ==================================
-    # Score Threshold
-    # ==================================
-
-
-    def get_by_score(
-
-        self,
-
-        score=8
-
-    ):
-
-
-        """
-        取得指定分數以上 Knowledge
-
-        """
-
-
-        return self.repository.find_by_score(
-
-            score
-
-        )
-
-
-
-
-
-
-
-    # ==================================
+    # ==================================================
     # Ranking Calculation
-    # ==================================
-
+    #
+    # P3.7.1
+    # ==================================================
 
     def calculate_ranking(
-
         self,
-
         importance,
-
         confidence,
-
         quality_score,
-
         freshness_score
-
     ):
-
-
         """
-        Ranking Formula
+        計算 Knowledge Ranking Score。
 
+        Score 統一轉換成 0 ~ 10。
 
-        Importance:
-            40%
+        權重:
 
+            Importance      30%
+            Confidence      20%
+            Quality         25%
+            Freshness       25%
 
-        Confidence:
-            20%
+        importance:
+            0 ~ 10
 
+        confidence:
+            0.0 ~ 1.0
 
-        Quality:
-            20%
+        quality_score:
+            0 ~ 10
 
-
-        Freshness:
-            20%
-
-
+        freshness_score:
+            0 ~ 10
         """
 
-
-        ranking = (
-
-            importance * 0.4
-
-            +
-
-            confidence * 10 * 0.2
-
-            +
-
-            quality_score * 0.2
-
-            +
-
-            freshness_score * 0.2
-
+        importance_score = (
+            float(importance)
         )
 
+        confidence_score = (
+            float(confidence) * 10
+        )
+
+        quality = (
+            float(quality_score)
+        )
+
+        freshness = (
+            float(freshness_score)
+        )
+
+        ranking_score = (
+
+            importance_score * 0.30
+
+            +
+
+            confidence_score * 0.20
+
+            +
+
+            quality * 0.25
+
+            +
+
+            freshness * 0.25
+
+        )
 
         return round(
-
-            ranking,
-
-            2
-
+            ranking_score,
+            4
         )
 
+    # ==================================================
+    # Top Ranking
+    #
+    # P3.7.2
+    # ==================================================
 
+    def get_top_ranking(
+        self,
+        limit=10
+    ):
+        """
+        取得最高 Ranking Score。
+        """
 
+        return self.repository.top_ranking(
+            limit
+        )
 
+    # ==================================================
+    # Score Filter
+    #
+    # P3.7.3
+    # ==================================================
 
+    def find_by_score(
+        self,
+        score
+    ):
+        """
+        查詢指定 Ranking Score
+        以上的 Knowledge。
+        """
 
+        return self.repository.find_by_score(
+            score
+        )
 
+    # ==================================================
+    # Get Score
+    #
+    # P3.7.4
+    # ==================================================
 
-    # ==================================
-    # Update Ranking
-    # ==================================
+    def get_score(
+        self,
+        knowledge_id
+    ):
+        """
+        取得指定 Knowledge Score。
+        """
 
+        return self.repository.get_by_knowledge_id(
+            knowledge_id
+        )
+
+    # ==================================================
+    # Has Score
+    #
+    # P3.7.5
+    # ==================================================
+
+    def has_score(
+        self,
+        knowledge_id
+    ):
+        """
+        判斷 Knowledge 是否已有 Score。
+        """
+
+        return self.repository.exists(
+            knowledge_id
+        )
+
+    # ==================================================
+    # Update Score
+    #
+    # P3.7.6
+    # ==================================================
 
     def update_score(
-
         self,
-
-        score_id,
-
+        knowledge_id,
         score
-
     ):
-
-
         """
-        更新 Knowledge Score
-
+        更新 Knowledge Score。
         """
 
-
-        return self.repository.update(
-
-            score_id,
-
+        self.repository.update(
+            knowledge_id,
             score
+        )
 
+        return score
+
+    # ==================================================
+    # Ranking Retrieval
+    #
+    # P3.7.7
+    # ==================================================
+
+    def get_ranking(
+        self,
+        limit=10
+    ):
+        """
+        Ranking Retrieval。
+        """
+
+        return self.get_top_ranking(
+            limit
         )

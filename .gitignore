@@ -10,3 +10,9 @@ logs/
 
 # VS Code
 .vscode/
+
+.pytest_cache/
+
+
+.venv/
+venv/

@@ -1,0 +1,160 @@
+services:
+
+  # ==================================================
+  # MySQL
+  # ==================================================
+
+  mysql:
+
+    image: mysql:8.0
+
+    container_name: autosearch-mysql
+
+    restart: unless-stopped
+
+    environment:
+
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+
+      MYSQL_DATABASE: ${DB_NAME}
+
+    ports:
+
+      - "3307:3306"
+
+    volumes:
+
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-uroot",
+          "-p${DB_PASSWORD}"
+        ]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 10
+
+
+  # ==================================================
+  # AutoSearch V4
+  #
+  # FastAPI / Web UI / API
+  # ==================================================
+
+  autosearch:
+
+    build:
+
+      context: .
+
+      dockerfile: Dockerfile
+
+    container_name: autosearch-v4
+
+    restart: unless-stopped
+
+    env_file:
+
+      - .env
+
+    environment:
+
+      DB_HOST: mysql
+
+      DB_PORT: 3306
+
+    ports:
+
+      - "8000:8000"
+
+    depends_on:
+
+      mysql:
+
+        condition: service_healthy
+
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ]
+
+
+  # ==================================================
+  # AI Scheduler
+  #
+  # P3.11.3
+  #
+  # 負責：
+  #
+  # - AI Scheduler
+  # - AI Worker Pool
+  # - Background AI Processing
+  # - Worker Monitoring
+  #
+  # Entry Point:
+  #
+  # python -m services.ai_scheduler
+  #
+  # ==================================================
+
+  ai-scheduler:
+
+    build:
+
+      context: .
+
+      dockerfile: Dockerfile
+
+    container_name: autosearch-scheduler
+
+    restart: unless-stopped
+
+    env_file:
+
+      - .env
+
+    environment:
+
+      DB_HOST: mysql
+
+      DB_PORT: 3306
+
+    depends_on:
+
+      mysql:
+
+        condition: service_healthy
+
+    command:
+      [
+        "python",
+        "-m",
+        "services.ai_scheduler"
+      ]
+
+
+# ==================================================
+# Persistent Volumes
+# ==================================================
+
+volumes:
+
+  mysql_data:

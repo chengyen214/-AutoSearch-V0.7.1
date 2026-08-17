@@ -1,5 +1,6 @@
 """
 AutoSearch 系統設定
+config\settings.py
 """
 
 # 搜尋設定

@@ -17,10 +17,20 @@ Knowledge Intelligence API Router
 3. High Quality Knowledge
 
 
+Endpoints:
+
+    GET /intelligence/article/{article_id}
+
+    GET /intelligence/top
+
+    GET /intelligence/high-quality?score=8
 """
 
 
-from fastapi import APIRouter, Query
+from fastapi import (
+    APIRouter,
+    Query
+)
 
 
 from services.knowledge_intelligence_service import (
@@ -31,11 +41,15 @@ from services.knowledge_intelligence_service import (
 
 
 
+# ==================================================
+# Router
+# ==================================================
+
 router = APIRouter(
 
     prefix="/knowledge/intelligence",
 
-    tags=["Knowledge Intelligence"]
+    tags=["Intelligence API"]
 
 )
 
@@ -43,10 +57,11 @@ router = APIRouter(
 
 
 
+# ==================================================
+# Service
+# ==================================================
 
 service = KnowledgeIntelligenceService()
-
-
 
 
 
@@ -56,44 +71,36 @@ service = KnowledgeIntelligenceService()
 # Article Intelligence
 # ==================================================
 
-
 @router.get(
     "/article/{article_id}"
 )
 def get_article_intelligence(
 
-
-    article_id:int
-
+    article_id: int
 
 ):
+    """
+    取得指定 Article 的 Knowledge Intelligence。
 
+    GET:
+
+        /intelligence/article/{article_id}
+    """
 
     result = service.get_knowledge(
 
-
         article_id
-
 
     )
 
 
-
     return {
-
 
         "success": True,
 
-
         "data": result
 
-
     }
-
-
-
-
-
 
 
 
@@ -103,46 +110,45 @@ def get_article_intelligence(
 # Top Intelligence
 # ==================================================
 
-
 @router.get(
     "/top"
 )
 def get_top_intelligence(
 
-
-    limit:int = 10
-
+    limit: int = Query(
+        10,
+        ge=1
+    )
 
 ):
+    """
+    取得最高 Intelligence Ranking。
 
+    GET:
+
+        /intelligence/top
+
+    Query:
+
+        limit
+    """
 
     result = service.get_top_intelligence(
 
-
         limit
-
 
     )
 
 
-
     return {
-
 
         "success": True,
 
-
         "count": len(result),
-
 
         "data": result
 
-
     }
-
-
-
-
 
 
 
@@ -152,42 +158,40 @@ def get_top_intelligence(
 # High Quality Knowledge
 # ==================================================
 
-
 @router.get(
     "/high-quality"
 )
 def get_high_quality(
 
-
-    score:float = Query(8.0)
-
+    score: float = Query(
+        8.0,
+        ge=0
+    )
 
 ):
+    """
+    取得高品質 Knowledge。
 
+    GET:
+
+        /intelligence/high-quality?score=8
+    """
 
     result = service.get_high_quality(
 
-
         score
-
 
     )
 
 
-
     return {
-
 
         "success": True,
 
-
         "score": score,
-
 
         "count": len(result),
 
-
         "data": result
-
 
     }

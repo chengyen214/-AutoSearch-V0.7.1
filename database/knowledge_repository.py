@@ -273,6 +273,28 @@ class KnowledgeRepository:
             conn.close()
 
     # ==================================
+    # Find All
+    # ==================================
+
+    def find_all(
+        self,
+        limit=20
+    ):
+        """
+        取得 Knowledge Archive 最新資料。
+
+        用於：
+
+            KnowledgeService.latest()
+        """
+
+        return self.get_latest(
+            limit
+        )
+
+
+
+    # ==================================
     # Topic Search
     # ==================================
 

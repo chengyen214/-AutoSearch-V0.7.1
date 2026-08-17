@@ -1,18 +1,50 @@
 [
     {
         "keyword": "IC semiconductor",
-        "time": "2026-08-10 15:05:00",
+        "time": "2026-08-13 14:05:27",
         "total_results": 70,
-        "new_documents": 52,
+        "new_documents": 48,
         "duplicate_documents": 0,
-        "failed_documents": 18
+        "failed_documents": 22
     },
     {
         "keyword": "IC semiconductor",
-        "time": "2026-08-11 16:44:56",
+        "time": "2026-08-14 19:45:14",
         "total_results": 70,
-        "new_documents": 43,
+        "new_documents": 41,
+        "duplicate_documents": 6,
+        "failed_documents": 23
+    },
+    {
+        "keyword": "IC semiconductor",
+        "time": "2026-08-15 13:25:27",
+        "total_results": 70,
+        "new_documents": 28,
+        "duplicate_documents": 19,
+        "failed_documents": 23
+    },
+    {
+        "keyword": "IC semiconductor",
+        "time": "2026-08-16 13:39:15",
+        "total_results": 70,
+        "new_documents": 41,
         "duplicate_documents": 7,
-        "failed_documents": 20
+        "failed_documents": 22
+    },
+    {
+        "keyword": "IC semiconductor",
+        "time": "2026-08-16 17:26:05",
+        "total_results": 70,
+        "new_documents": 28,
+        "duplicate_documents": 20,
+        "failed_documents": 22
+    },
+    {
+        "keyword": "IC semiconductor",
+        "time": "2026-08-17 17:07:14",
+        "total_results": 70,
+        "new_documents": 38,
+        "duplicate_documents": 10,
+        "failed_documents": 22
     }
 ]

@@ -123,7 +123,7 @@ def archive_ui(
         context={
             "statistics": statistics,
             "articles": articles,
-            "version": "V4-P2.3.9"
+            "version": "V4-P2.4.3"
         }
     )
 
@@ -132,10 +132,15 @@ def archive_ui(
 # P2.4.3
 #
 # Composite Archive Search Web UI
+#
+# 注意:
+#
+# /search 保留給 JSON API。
+# Web UI 改成 /search/ui。
 # ============================================================
 
 @router.get(
-    "/search",
+    "/search/ui",
     include_in_schema=False
 )
 def search_ui(
@@ -146,19 +151,11 @@ def search_ui(
 
     Composite Archive Search Web UI。
 
-    GET /archive/search
+    GET /archive/search/ui
 
-    頁面：
+    真正的搜尋 API:
 
-        http://127.0.0.1:8000/archive/search
-
-    注意:
-
-        此 endpoint 只負責回傳 HTML。
-
-        真正的搜尋由 JavaScript 呼叫：
-
-            /archive/search/api
+        /archive/search
     """
 
     return templates.TemplateResponse(
@@ -201,12 +198,6 @@ def get_articles(
 
 # ============================================================
 # Pagination
-#
-# IMPORTANT:
-#
-# Must be declared before:
-#
-# /articles/{article_id}
 # ============================================================
 
 @router.get(
@@ -330,8 +321,6 @@ def get_by_date(
 ):
     """
     依日期取得 Archive。
-
-    GET /archive/date/2026-08-08
     """
 
     service = get_archive_service()
@@ -354,8 +343,6 @@ def get_by_month(
 ):
     """
     依月份取得 Archive。
-
-    GET /archive/month/2026/08
     """
 
     if month < 1 or month > 12:
@@ -416,11 +403,11 @@ def get_by_source(
 
 
 # ============================================================
-# Basic Search API
+# Basic / Composite Search API
 # ============================================================
 
 @router.get(
-    "/basic-search"
+    "/search"
 )
 def search_archive(
     q: str = Query(
@@ -431,15 +418,17 @@ def search_archive(
     """
     Archive 基本搜尋。
 
-    GET /archive/basic-search?q=TSMC
+    GET /archive/search?q=TSMC
 
-    注意:
+    回傳 JSON。
 
-        這是 P2.3.9 Basic Search。
+    空 Query:
 
-        Composite Search 使用：
+        GET /archive/search?q=
 
-            /archive/search/api
+    FastAPI 自動回傳:
+
+        422
     """
 
     service = get_archive_service()
@@ -520,43 +509,9 @@ def composite_search(
     Endpoint:
 
         GET /archive/search/api
-
-    所有搜尋條件皆為 Optional。
-
-    支援:
-
-        keyword
-        source
-        date_from
-        date_to
-        year
-        month
-        category
-        importance_min
-        importance_max
-
-    分頁:
-
-        page
-        page_size
-
-    Example:
-
-        GET /archive/search/api
-
-        GET /archive/search/api?keyword=TSMC
-
-        GET /archive/search/api?keyword=TSMC&source=CNA
-
-        GET /archive/search/api?\
-keyword=TSMC&source=CNA&date_from=2026-08-01&date_to=2026-08-09
-
-        GET /archive/search/api?\
-category=Semiconductor&importance_min=8
     """
 
     service = get_archive_service()
-
 
     # --------------------------------------------------------
     # Validate Importance Range
@@ -576,7 +531,6 @@ category=Semiconductor&importance_min=8
             )
         )
 
-
     # --------------------------------------------------------
     # Validate Date Range
     # --------------------------------------------------------
@@ -594,7 +548,6 @@ category=Semiconductor&importance_min=8
                 "greater than date_to"
             )
         )
-
 
     # --------------------------------------------------------
     # Composite Search
@@ -625,7 +578,6 @@ category=Semiconductor&importance_min=8
         page_size=page_size
     )
 
-
     # --------------------------------------------------------
     # Normalize API Response
     # --------------------------------------------------------
@@ -649,7 +601,6 @@ category=Semiconductor&importance_min=8
                 "importance_max": importance_max
             }
         }
-
 
     return result
 

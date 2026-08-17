@@ -155,7 +155,7 @@ class LLMClient:
         Groq API 呼叫
         """
 
-        MAX_RETRY = 3
+        MAX_RETRY = 2
 
         logger.info(
             "===== GROQ REQUEST ====="

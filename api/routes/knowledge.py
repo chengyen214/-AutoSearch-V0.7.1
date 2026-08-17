@@ -3,31 +3,38 @@ api/routes/knowledge.py
 
 AutoSearch V4
 
-P1.4 Step 3
+P3.6
 
-Knowledge Retrieval API Router
+Knowledge API Router
 
 
 功能:
 
 1. Article Knowledge Query
-
 2. Topic Search
-
 3. Entity Search
-
 4. Relation Search
-
 5. Full Knowledge Search
-
 6. Latest Knowledge
+
+
+Validation:
+
+7. Empty Topic
+8. Empty Entity
+9. Empty Relation
+10. Empty Search
+11. Invalid Latest Limit
 
 
 """
 
 
-
-from fastapi import APIRouter, Query
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query
+)
 
 
 from services.knowledge_service import (
@@ -36,6 +43,11 @@ from services.knowledge_service import (
 
 
 
+
+
+# ==================================================
+# Router
+# ==================================================
 
 
 router = APIRouter(
@@ -52,16 +64,24 @@ router = APIRouter(
 
 
 
+# ==================================================
+# Service
+# ==================================================
+
+
 service = KnowledgeService()
 
 
 
 
 
-
-
 # ==================================================
-# Get Knowledge By Article
+# Article Knowledge
+#
+# GET
+#
+# /knowledge/article/{article_id}
+#
 # ==================================================
 
 
@@ -70,7 +90,7 @@ service = KnowledgeService()
 )
 def get_article_knowledge(
 
-    article_id:int
+    article_id: int
 
 ):
 
@@ -94,11 +114,17 @@ def get_article_knowledge(
 
 
 
-
-
-
 # ==================================================
 # Topic Search
+#
+# GET
+#
+# /knowledge/topic/{keyword}
+#
+# Validation:
+#
+# Empty Topic -> 400
+#
 # ==================================================
 
 
@@ -107,9 +133,31 @@ def get_article_knowledge(
 )
 def search_topic(
 
-    keyword:str
+    keyword: str
 
 ):
+
+
+    keyword = keyword.strip()
+
+
+    if not keyword:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail={
+
+                "success": False,
+
+                "message": (
+                    "Topic cannot be empty"
+                )
+
+            }
+
+        )
 
 
     result = service.search_topic(
@@ -133,11 +181,17 @@ def search_topic(
 
 
 
-
-
-
 # ==================================================
 # Entity Search
+#
+# GET
+#
+# /knowledge/entity/{keyword}
+#
+# Validation:
+#
+# Empty Entity -> 400
+#
 # ==================================================
 
 
@@ -146,9 +200,31 @@ def search_topic(
 )
 def search_entity(
 
-    keyword:str
+    keyword: str
 
 ):
+
+
+    keyword = keyword.strip()
+
+
+    if not keyword:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail={
+
+                "success": False,
+
+                "message": (
+                    "Entity cannot be empty"
+                )
+
+            }
+
+        )
 
 
     result = service.search_entity(
@@ -172,11 +248,17 @@ def search_entity(
 
 
 
-
-
-
 # ==================================================
 # Relation Search
+#
+# GET
+#
+# /knowledge/relation/{keyword}
+#
+# Validation:
+#
+# Empty Relation -> 400
+#
 # ==================================================
 
 
@@ -185,9 +267,31 @@ def search_entity(
 )
 def search_relation(
 
-    keyword:str
+    keyword: str
 
 ):
+
+
+    keyword = keyword.strip()
+
+
+    if not keyword:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail={
+
+                "success": False,
+
+                "message": (
+                    "Relation cannot be empty"
+                )
+
+            }
+
+        )
 
 
     result = service.search_relation(
@@ -211,11 +315,17 @@ def search_relation(
 
 
 
-
-
-
 # ==================================================
-# Full Search
+# Full Knowledge Search
+#
+# GET
+#
+# /knowledge/search?q=keyword
+#
+# Validation:
+#
+# Empty Keyword -> 400
+#
 # ==================================================
 
 
@@ -224,9 +334,31 @@ def search_relation(
 )
 def search_knowledge(
 
-    q:str = Query(...)
+    q: str = Query(...)
 
 ):
+
+
+    q = q.strip()
+
+
+    if not q:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail={
+
+                "success": False,
+
+                "message": (
+                    "Keyword cannot be empty"
+                )
+
+            }
+
+        )
 
 
     result = service.search(
@@ -252,11 +384,21 @@ def search_knowledge(
 
 
 
-
-
-
 # ==================================================
 # Latest Knowledge
+#
+# GET
+#
+# /knowledge/latest
+#
+# P3.6.6
+#
+# limit:
+#
+#     default = 20
+#     minimum = 1
+#     maximum = 100
+#
 # ==================================================
 
 
@@ -265,7 +407,15 @@ def search_knowledge(
 )
 def latest_knowledge(
 
-    limit:int = 20
+    limit: int = Query(
+
+        20,
+
+        ge=1,
+
+        le=100
+
+    )
 
 ):
 

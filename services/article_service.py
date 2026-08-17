@@ -3,10 +3,9 @@ services/article_service.py
 
 AutoSearch V4
 
-P2.4.2
+P2.4.2 / P3.2
 
 Article Service
-Archive History + AI Task Batch Trigger Integration
 
 功能:
 
@@ -16,129 +15,179 @@ Archive History + AI Task Batch Trigger Integration
 - Archive Version History
 - History Detection
 - Article Query
-- AI Task Trigger
+- AI Task Creation
 - AI Task Batch Trigger
+- Article Management
 
 Pipeline:
 
 Keyword
-↓
+    ↓
 Search
-↓
+    ↓
 Download
-↓
+    ↓
 Parser
-↓
+    ↓
 Article History Detection
-↓
+    ↓
 ArticleRepository
-↓
+    ↓
 articles
-↓
+    ↓
 ArchiveIntegration
-↓
+    ↓
 ArchiveService
-├── raw_documents
-└── archive_versions
-↓
+    ├── raw_documents
+    └── archive_versions
+    ↓
 AITaskRepository
-↓
+    ↓
 ai_tasks WAITING
-↓
+    ↓
 AIBatchTriggerService
-↓
-WAITING >= 50
-↓
+    ↓
+WAITING >= configurable threshold
+    ↓
 AIScheduler
-↓
+    ↓
 AIWorker
-↓
+    ↓
 Async AI Analysis
 
 
 Archive History:
 
 New URL
-↓
+    ↓
 Article
-↓
+    ↓
 Version 1
 
 Same URL + Same HTML
-↓
+    ↓
 Existing Article
-↓
+    ↓
 No New Version
-↓
+    ↓
 No AI Task
 
 Same URL + Changed HTML
-↓
+    ↓
 Existing Article
-↓
+    ↓
 Version 2
-↓
+    ↓
 AI Task WAITING
-↓
+    ↓
 Batch Trigger Check
-↓
+    ↓
 Version 3
-↓
+    ↓
 ...
+
+
+P3.2 Article Management:
+
+Article Query
+    ├── get_all()
+    ├── get_by_id()
+    ├── get_by_keyword()
+    └── get_by_source()
+
+AI Query
+    ├── get_by_importance()
+    ├── get_by_category()
+    ├── get_by_ai_keyword()
+    └── get_ai_top()
+
+Article Management
+    ├── update_article()
+    ├── delete_article()
+    └── count()
+
+
+注意:
+
+ArticleService 不負責:
+
+- AI Analysis
+- AI Worker
+- AI Scheduler
+- Knowledge Processing
+- Parser Registration
+- Parser Selection
+- Parser Pipeline
+- RSS Normalization
+- Source Adapter
+- Source-specific Processing
+
+ArticleService 負責:
+
+- Article Collection
+- Article Create
+- Parser
+- Article History
+- Archive
+- AI Task Creation
+- AI Batch Trigger
+- Article Query
+- Article Management
 """
+
 
 import hashlib
 
 
 from config.settings import (
     MAX_RESULTS,
-    HEADERS
+    HEADERS,
 )
 
 
 from database.article_repository import (
-    ArticleRepository
+    ArticleRepository,
 )
 
 
 from database.ai_task_repository import (
-    AITaskRepository
+    AITaskRepository,
 )
 
 
 from models.ai_task import (
-    AITask
+    AITask,
 )
 
 
 from search.search_engine import (
-    search
+    search,
 )
 
 
 from crawler.crawler import (
-    download
+    download,
 )
 
 
 from parser.parser import (
-    parse
+    parse,
 )
 
 
 from utils.hash import (
-    generate_hash
+    generate_hash,
 )
 
 
 from utils.duplicate import (
     is_duplicate,
-    save_document
+    save_document,
 )
 
 
 from utils.logger import (
-    logger
+    logger,
 )
 
 
@@ -149,12 +198,12 @@ from utils.logger import (
 # ======================================
 
 from services.archive_service import (
-    ArchiveService
+    ArchiveService,
 )
 
 
 from archive.archive_integration import (
-    ArchiveIntegration
+    ArchiveIntegration,
 )
 
 
@@ -167,16 +216,15 @@ from archive.archive_integration import (
 # ======================================
 
 from services.ai_batch_trigger_service import (
-    AIBatchTriggerService
+    AIBatchTriggerService,
 )
 
 
 class ArticleService:
-
     """
     Article Service
 
-    P2.4.2
+    P2.4.2 + P3.2
 
     負責:
 
@@ -184,12 +232,20 @@ class ArticleService:
         Archive History
         AI Task Creation
         AI Batch Trigger
+        Article Query
+        Article Management
 
     不負責:
 
         AI Analysis
         AI Worker
+        AI Scheduler
         Knowledge Processing
+        Parser Registration
+        Parser Selection
+        Parser Pipeline
+        RSS Normalization
+        Source Adapter
     """
 
     # ==================================================
@@ -204,8 +260,19 @@ class ArticleService:
         task_repo=None,
         archive_service=None,
         archive_integration=None,
-        batch_trigger=None
+        batch_trigger=None,
     ):
+        """
+        建立 Article Service。
+
+        Dependency Injection:
+
+        - ArticleRepository
+        - AITaskRepository
+        - ArchiveService
+        - ArchiveIntegration
+        - AIBatchTriggerService
+        """
 
         # ==================================
         #
@@ -219,7 +286,6 @@ class ArticleService:
 
         self.repo = repo
 
-
         # ==================================
         #
         # AI Task Repository
@@ -232,17 +298,9 @@ class ArticleService:
 
         self.task_repo = task_repo
 
-
         # ==================================
         #
         # Archive Service
-        #
-        # 負責:
-        #
-        # 1. HTML Snapshot
-        # 2. RawDocument
-        # 3. ArchiveVersion
-        # 4. Version Number
         #
         # ==================================
 
@@ -254,20 +312,11 @@ class ArticleService:
             archive_service
         )
 
-
         # ==================================
         #
         # Archive Integration
         #
         # P2.3
-        #
-        # 負責:
-        #
-        # 1. History Detection
-        # 2. Timeline
-        # 3. Version Query
-        # 4. Diff
-        # 5. Knowledge History
         #
         # ==================================
 
@@ -286,16 +335,11 @@ class ArticleService:
             archive_integration
         )
 
-
         # ==================================
         #
         # AI Batch Trigger
         #
         # P2.4.2
-        #
-        # 預設:
-        #
-        # WAITING >= 50
         #
         # ==================================
 
@@ -313,7 +357,6 @@ class ArticleService:
             batch_trigger
         )
 
-
     # ==================================================
     #
     # Find Existing Article By URL
@@ -322,7 +365,7 @@ class ArticleService:
 
     def _find_existing_article_by_url(
         self,
-        url
+        url,
     ):
         """
         依 URL 找出既有 Article。
@@ -332,7 +375,10 @@ class ArticleService:
             find_by_url()
 
         若目前 Repository 尚未提供，
-        fallback 到 find_all()。
+
+        fallback:
+
+            find_all()
         """
 
         try:
@@ -343,13 +389,12 @@ class ArticleService:
 
             if hasattr(
                 self.repo,
-                "find_by_url"
+                "find_by_url",
             ):
 
                 return self.repo.find_by_url(
                     url
                 )
-
 
             # ==================================
             # Fallback
@@ -357,7 +402,7 @@ class ArticleService:
 
             if hasattr(
                 self.repo,
-                "find_all"
+                "find_all",
             ):
 
                 articles = (
@@ -368,7 +413,7 @@ class ArticleService:
 
                     if isinstance(
                         item,
-                        dict
+                        dict,
                     ):
 
                         item_url = item.get(
@@ -380,7 +425,7 @@ class ArticleService:
                         item_url = getattr(
                             item,
                             "url",
-                            None
+                            None,
                         )
 
                     if item_url == url:
@@ -390,11 +435,11 @@ class ArticleService:
         except Exception as e:
 
             logger.exception(
-                f"Find existing article error: {e}"
+                "Find existing article error: "
+                f"{e}"
             )
 
         return None
-
 
     # ==================================================
     #
@@ -404,7 +449,7 @@ class ArticleService:
 
     @staticmethod
     def _get_article_id(
-        article
+        article,
     ):
         """
         從 Article object / dict 取得 ID。
@@ -414,23 +459,20 @@ class ArticleService:
 
             return None
 
-
         if isinstance(
             article,
-            dict
+            dict,
         ):
 
             return article.get(
                 "id"
             )
 
-
         return getattr(
             article,
             "id",
-            None
+            None,
         )
-
 
     # ==================================================
     #
@@ -440,39 +482,27 @@ class ArticleService:
 
     @staticmethod
     def _get_html_hash(
-        html
+        html,
     ):
         """
-        計算與 ArchiveService 完全一致的
+        計算與 ArchiveService 一致的
         HTML File Hash。
-
-        ArchiveService.save_html():
-
-            open(..., "w", encoding="utf-8")
-            f.write(html)
-
-        因此實際落盤內容為:
-
-            html.encode("utf-8")
         """
 
         if html is None:
 
             html = ""
 
-
         if not isinstance(
             html,
-            str
+            str,
         ):
 
             html = str(html)
 
-
         return hashlib.sha256(
             html.encode("utf-8")
         ).hexdigest()
-
 
     # ==================================================
     #
@@ -482,7 +512,7 @@ class ArticleService:
 
     def _get_latest_archive_version(
         self,
-        article_id
+        article_id,
     ):
         """
         透過 ArchiveIntegration
@@ -496,11 +526,9 @@ class ArticleService:
                 ._get_archive_repository()
             )
 
-
             if repository is None:
 
                 return None
-
 
             # ==================================
             # ArchiveVersionRepository API
@@ -508,7 +536,7 @@ class ArticleService:
 
             if hasattr(
                 repository,
-                "get_latest_version"
+                "get_latest_version",
             ):
 
                 return (
@@ -518,14 +546,13 @@ class ArticleService:
                     )
                 )
 
-
             # ==================================
             # Compatibility
             # ==================================
 
             if hasattr(
                 repository,
-                "get_latest"
+                "get_latest",
             ):
 
                 return (
@@ -544,7 +571,6 @@ class ArticleService:
 
         return None
 
-
     # ==================================================
     #
     # Check Archive History
@@ -554,7 +580,7 @@ class ArticleService:
     def _check_archive_history(
         self,
         article_id,
-        html
+        html,
     ):
         """
         判斷 Article 是否需要建立新的
@@ -563,9 +589,9 @@ class ArticleService:
         使用:
 
             HTML SHA256
-            ↓
+                ↓
             latest archive_versions.file_hash
-            ↓
+                ↓
             比較
         """
 
@@ -575,13 +601,11 @@ class ArticleService:
             )
         )
 
-
         latest = (
             self._get_latest_archive_version(
                 article_id
             )
         )
-
 
         # ==================================
         # No History
@@ -590,19 +614,12 @@ class ArticleService:
         if latest is None:
 
             return {
-
                 "exists": False,
-
                 "changed": True,
-
                 "latest_version": None,
-
                 "latest_version_number": None,
-
-                "file_hash": file_hash
-
+                "file_hash": file_hash,
             }
-
 
         # ==================================
         # Existing History
@@ -611,38 +628,28 @@ class ArticleService:
         old_hash = getattr(
             latest,
             "file_hash",
-            None
+            None,
         )
-
 
         changed = (
             old_hash != file_hash
         )
 
-
         latest_version_number = getattr(
             latest,
             "version_number",
-            None
+            None,
         )
 
-
         return {
-
             "exists": True,
-
             "changed": changed,
-
             "latest_version": latest,
-
             "latest_version_number": (
                 latest_version_number
             ),
-
-            "file_hash": file_hash
-
+            "file_hash": file_hash,
         }
-
 
     # ==================================================
     #
@@ -653,28 +660,30 @@ class ArticleService:
     # ==================================================
 
     def _trigger_ai_batch(
-        self
+        self,
     ):
         """
         檢查 WAITING AI Task 數量。
 
-        當:
+        AIBatchTriggerService 負責:
 
-            WAITING >= 50
+            WAITING Queue
+                ↓
+            Threshold Check
+                ↓
+            Scheduler
+                ↓
+            Worker
 
-        時:
+        ArticleService:
 
-            AIBatchTriggerService
-                    ↓
-            AIScheduler.start()
-                    ↓
-            AIWorker
+            只負責通知 Batch Trigger。
 
-        注意:
+        ArticleService 不直接:
 
-        這裡只負責通知 Batch Trigger。
-
-        不直接啟動 Worker。
+            啟動 Scheduler
+            啟動 Worker
+            判斷 Threshold
         """
 
         try:
@@ -684,23 +693,21 @@ class ArticleService:
                 .check_and_trigger()
             )
 
-
             logger.info(
                 "AI Batch Trigger checked: "
                 f"triggered={result}"
             )
-
 
             return result
 
         except Exception as e:
 
             logger.exception(
-                f"AI Batch Trigger error: {e}"
+                "AI Batch Trigger error: "
+                f"{e}"
             )
 
             return False
-
 
     # ==================================================
     #
@@ -710,8 +717,49 @@ class ArticleService:
 
     def create(
         self,
-        keyword
+        keyword,
     ):
+        """
+        搜尋並建立 Articles。
+
+        Pipeline:
+
+            Keyword
+                ↓
+            Search
+                ↓
+            Download
+                ↓
+            Parser
+                ↓
+            History Detection
+                ↓
+            ArticleRepository
+                ↓
+            Archive
+                ↓
+            AI Task WAITING
+                ↓
+            Batch Trigger
+
+        Same URL + Same HTML:
+
+            No New Version
+            No AI Task
+
+        Same URL + Changed HTML:
+
+            New Archive Version
+            AI Task WAITING
+            Batch Trigger
+
+        New URL:
+
+            Article
+            Archive Version 1
+            AI Task WAITING
+            Batch Trigger
+        """
 
         articles = []
 
@@ -720,26 +768,27 @@ class ArticleService:
         duplicate = 0
         failed = 0
 
-
         try:
 
             # ==================================
+            #
             # Search
+            #
             # ==================================
 
             results = search(
                 keyword,
-                MAX_RESULTS
+                MAX_RESULTS,
             )
-
 
             total = len(
                 results
             )
 
-
             # ==================================
+            #
             # Process Results
+            #
             # ==================================
 
             for item in results:
@@ -750,51 +799,54 @@ class ArticleService:
                         f"Processing {item.title}"
                     )
 
-
                     # ==================================
+                    #
                     # Download
+                    #
                     # ==================================
 
                     html = download(
                         item.url,
-                        HEADERS
+                        HEADERS,
                     )
-
 
                     if html is None:
 
                         failed += 1
 
                         logger.warning(
-                            f"Download failed: {item.url}"
+                            "Download failed: "
+                            f"{item.url}"
                         )
 
                         continue
 
-
                     # ==================================
+                    #
                     # Parser
+                    #
                     # ==================================
 
                     article = parse(
                         html,
-                        keyword
+                        keyword,
                     )
-
 
                     if article is None:
 
                         failed += 1
 
                         logger.warning(
-                            f"Parse failed: {item.url}"
+                            "Parse failed: "
+                            f"{item.url}"
                         )
 
                         continue
 
-
                     # ==================================
+                    #
                     # Article Metadata
+                    #
                     # ==================================
 
                     article.keyword = keyword
@@ -805,26 +857,28 @@ class ArticleService:
 
                     article.source = item.source
 
-                    article.published = item.published
+                    article.published = (
+                        item.published
+                    )
 
                     article.status = "Success"
 
-
                     # ==================================
+                    #
                     # Document ID
+                    #
                     # ==================================
 
                     article.document_id = (
                         generate_hash(
                             article.title,
-                            article.content
+                            article.content,
                         )
                     )
 
-
                     # ==================================
                     #
-                    # Find Existing Article By URL
+                    # Find Existing Article
                     #
                     # History Detection 必須優先於
                     # Document Duplicate Detection。
@@ -838,13 +892,11 @@ class ArticleService:
                         )
                     )
 
-
                     existing_article_id = (
                         self._get_article_id(
                             existing_article
                         )
                     )
-
 
                     # ==================================
                     #
@@ -860,19 +912,19 @@ class ArticleService:
                             f"url={item.url}"
                         )
 
-
                         # ==================================
+                        #
                         # History Detection
+                        #
                         # ==================================
 
                         history_result = (
                             self
                             ._check_archive_history(
                                 existing_article_id,
-                                html
+                                html,
                             )
                         )
-
 
                         # ==================================
                         #
@@ -897,12 +949,11 @@ class ArticleService:
 
                             # 不建立:
                             #
-                            # Article
-                            # Version
+                            # Article Version
                             # AI Task
-                            #
-                            continue
+                            # Batch Trigger
 
+                            continue
 
                         # ==================================
                         #
@@ -918,7 +969,6 @@ class ArticleService:
                             f"{history_result['latest_version_number']}"
                         )
 
-
                         # ==================================
                         #
                         # Save New Document Hash
@@ -933,7 +983,6 @@ class ArticleService:
                                 article.document_id
                             )
 
-
                         # ==================================
                         #
                         # Save New Archive Version
@@ -942,18 +991,13 @@ class ArticleService:
 
                         archive_version = (
                             self.archive_service.save_html(
-
                                 article_id=(
                                     existing_article_id
                                 ),
-
                                 url=item.url,
-
-                                html=html
-
+                                html=html,
                             )
                         )
-
 
                         if archive_version is None:
 
@@ -966,7 +1010,6 @@ class ArticleService:
                             )
 
                             continue
-
 
                         # ==================================
                         #
@@ -982,7 +1025,6 @@ class ArticleService:
                             f"{archive_version.version_number}"
                         )
 
-
                         # ==================================
                         #
                         # Create AI Task
@@ -995,7 +1037,6 @@ class ArticleService:
                         task = self.create_ai_task(
                             existing_article_id
                         )
-
 
                         if task is None:
 
@@ -1011,13 +1052,9 @@ class ArticleService:
                             #
                             # P2.4.2 Batch Trigger
                             #
-                            # AI Task 成功建立後
-                            # 檢查 WAITING Queue。
-                            #
                             # ==================================
 
                             self._trigger_ai_batch()
-
 
                         # ==================================
                         #
@@ -1033,7 +1070,6 @@ class ArticleService:
 
                         continue
 
-
                     # ==================================
                     #
                     # New Article
@@ -1046,7 +1082,6 @@ class ArticleService:
                         "New article detected: "
                         f"url={item.url}"
                     )
-
 
                     # ==================================
                     #
@@ -1067,7 +1102,6 @@ class ArticleService:
 
                         continue
 
-
                     # ==================================
                     #
                     # Save Document Hash
@@ -1077,7 +1111,6 @@ class ArticleService:
                     save_document(
                         article.document_id
                     )
-
 
                     # ==================================
                     #
@@ -1091,7 +1124,6 @@ class ArticleService:
                         article
                     )
 
-
                     if saved is None:
 
                         failed += 1
@@ -1102,7 +1134,6 @@ class ArticleService:
 
                         continue
 
-
                     # ==================================
                     #
                     # Archive Version 1
@@ -1111,16 +1142,11 @@ class ArticleService:
 
                     archive_version = (
                         self.archive_service.save_html(
-
                             article_id=saved.id,
-
                             url=item.url,
-
-                            html=html
-
+                            html=html,
                         )
                     )
-
 
                     # ==================================
                     #
@@ -1134,15 +1160,12 @@ class ArticleService:
                         failed += 1
 
                         logger.error(
-
                             "Archive failed, "
                             f"article={saved.id}. "
                             "AI Task will not be created."
-
                         )
 
                         continue
-
 
                     # ==================================
                     #
@@ -1151,16 +1174,11 @@ class ArticleService:
                     # ==================================
 
                     logger.info(
-
                         "Archive completed: "
-
                         f"article={saved.id}, "
-
                         f"version="
                         f"{archive_version.version_number}"
-
                     )
-
 
                     # ==================================
                     #
@@ -1172,14 +1190,11 @@ class ArticleService:
                         saved.id
                     )
 
-
                     if task is None:
 
                         logger.warning(
-
                             "AI Task creation failed: "
                             f"article={saved.id}"
-
                         )
 
                     else:
@@ -1195,7 +1210,6 @@ class ArticleService:
 
                         self._trigger_ai_batch()
 
-
                     # ==================================
                     #
                     # Result
@@ -1208,56 +1222,43 @@ class ArticleService:
 
                     new += 1
 
-
                 except Exception as e:
 
                     failed += 1
 
                     logger.exception(
-                        f"Article processing error: {e}"
+                        "Article processing error: "
+                        f"{e}"
                     )
 
-
             # ==================================
+            #
             # Return
+            #
             # ==================================
 
             return {
-
                 "articles": articles,
-
                 "total": total,
-
                 "new": new,
-
                 "duplicate": duplicate,
-
-                "failed": failed
-
+                "failed": failed,
             }
-
 
         except Exception as e:
 
             logger.exception(
-                f"Article create error: {e}"
+                "Article create error: "
+                f"{e}"
             )
 
-
             return {
-
                 "articles": [],
-
                 "total": total,
-
                 "new": new,
-
                 "duplicate": duplicate,
-
-                "failed": failed
-
+                "failed": failed,
             }
-
 
     # ==================================================
     #
@@ -1267,7 +1268,7 @@ class ArticleService:
 
     def create_ai_task(
         self,
-        article_id
+        article_id,
     ):
         """
         建立 AI Analysis Task。
@@ -1286,24 +1287,16 @@ class ArticleService:
         try:
 
             task = AITask(
-
                 article_id=article_id,
-
                 task_type="analysis",
-
                 status="WAITING",
-
                 priority=0,
-
-                retry_count=0
-
+                retry_count=0,
             )
-
 
             result = self.task_repo.insert(
                 task
             )
-
 
             if result is None:
 
@@ -1314,35 +1307,37 @@ class ArticleService:
 
                 return None
 
-
             logger.info(
-                "AI Task created "
-                f"article={article_id}"
+                "AI Task created: "
+                f"article={article_id}, "
+                "status=WAITING"
             )
 
-
             return result
-
 
         except Exception as e:
 
             logger.exception(
-                f"Create AI Task error: {e}"
+                "Create AI Task error: "
+                f"{e}"
             )
 
             return None
 
-
     # ==================================================
     #
-    # Query
+    # P3.2
+    # Article Query
     #
     # ==================================================
 
     def get_all(
         self,
-        limit=None
+        limit=None,
     ):
+        """
+        取得 Article 列表。
+        """
 
         try:
 
@@ -1352,17 +1347,22 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Get all articles error: "
+                f"{e}"
+            )
 
             return []
-
 
     # ==================================================
 
     def get_by_id(
         self,
-        article_id
+        article_id,
     ):
+        """
+        依 ID 取得 Article。
+        """
 
         try:
 
@@ -1372,17 +1372,22 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Get article by id error: "
+                f"{e}"
+            )
 
             return None
-
 
     # ==================================================
 
     def get_by_keyword(
         self,
-        keyword
+        keyword,
     ):
+        """
+        依 Keyword 取得 Article。
+        """
 
         try:
 
@@ -1392,17 +1397,22 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Get by keyword error: "
+                f"{e}"
+            )
 
             return []
-
 
     # ==================================================
 
     def get_by_source(
         self,
-        source
+        source,
     ):
+        """
+        依 Source 取得 Article。
+        """
 
         try:
 
@@ -1412,95 +1422,346 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Get by source error: "
+                f"{e}"
+            )
 
             return []
 
-
     # ==================================================
     #
+    # P3.2
     # AI Query
     #
     # ==================================================
 
     def get_by_importance(
         self,
-        level
+        level,
     ):
+        """
+        取得 AI Importance >= level。
+        """
 
-        return self.repo.find_by_importance(
-            level
-        )
+        try:
 
+            return self.repo.find_by_importance(
+                level
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Get AI importance error: "
+                f"{e}"
+            )
+
+            return []
 
     # ==================================================
 
     def get_by_category(
         self,
-        category
+        category,
     ):
+        """
+        依 AI Category 搜尋。
+        """
 
-        return self.repo.find_by_category(
-            category
-        )
+        try:
 
+            return self.repo.find_by_category(
+                category
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Get AI category error: "
+                f"{e}"
+            )
+
+            return []
 
     # ==================================================
 
     def get_by_ai_keyword(
         self,
-        keyword
+        keyword,
     ):
+        """
+        依 AI Keyword 搜尋。
+        """
 
-        return self.repo.find_by_ai_keyword(
-            keyword
-        )
+        try:
 
+            return self.repo.find_by_ai_keyword(
+                keyword
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Get AI keyword error: "
+                f"{e}"
+            )
+
+            return []
 
     # ==================================================
 
     def get_ai_top(
         self,
-        limit=10
+        limit=10,
     ):
+        """
+        AI Importance Ranking。
+        """
 
         try:
 
             articles = self.repo.find_all()
 
+            def importance_value(
+                item,
+            ):
+
+                if isinstance(
+                    item,
+                    dict,
+                ):
+
+                    value = item.get(
+                        "ai_importance",
+                        0,
+                    )
+
+                else:
+
+                    value = getattr(
+                        item,
+                        "ai_importance",
+                        0,
+                    )
+
+                if value is None:
+
+                    return 0
+
+                try:
+
+                    return float(value)
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+
+                    return 0
 
             articles.sort(
-
-                key=lambda x:
-                x.get(
-                    "ai_importance",
-                    0
-                ),
-
-                reverse=True
-
+                key=importance_value,
+                reverse=True,
             )
-
 
             return articles[:limit]
 
-
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Get AI top error: "
+                f"{e}"
+            )
 
             return []
 
+    # ==================================================
+    #
+    # P3.2
+    # Update Article
+    #
+    # ==================================================
+
+    def update_article(
+        self,
+        article_id,
+        keyword=None,
+        title=None,
+        url=None,
+        source=None,
+        published=None,
+        status=None,
+    ):
+        """
+        更新 Article Metadata。
+
+        P3.2 Article Management。
+
+        不負責:
+
+            AI Analysis
+            Archive Version
+            AI Task
+            Batch Trigger
+        """
+
+        try:
+
+            existing = self.repo.find_by_id(
+                article_id
+            )
+
+            if existing is None:
+
+                logger.warning(
+                    "Article update failed: "
+                    f"id={article_id} not found"
+                )
+
+                return None
+
+            if not hasattr(
+                self.repo,
+                "update",
+            ):
+
+                logger.error(
+                    "ArticleRepository.update "
+                    "not implemented"
+                )
+
+                return None
+
+            result = self.repo.update(
+                article_id=article_id,
+                keyword=keyword,
+                title=title,
+                url=url,
+                source=source,
+                published=published,
+                status=status,
+            )
+
+            if not result:
+
+                logger.warning(
+                    "Article update failed: "
+                    f"id={article_id}"
+                )
+
+                return None
+
+            logger.info(
+                "Article updated successfully: "
+                f"id={article_id}"
+            )
+
+            return self.repo.find_by_id(
+                article_id
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Update article error: "
+                f"{e}"
+            )
+
+            return None
 
     # ==================================================
     #
+    # P3.2
+    # Delete Article
+    #
+    # ==================================================
+
+    def delete_article(
+        self,
+        article_id,
+    ):
+        """
+        刪除 Article。
+
+        Repository 負責:
+
+            Article existence
+            Archive Protection
+            Raw Document Protection
+            AI Task Protection
+            Knowledge Archive Protection
+        """
+
+        try:
+
+            existing = self.repo.find_by_id(
+                article_id
+            )
+
+            if existing is None:
+
+                logger.warning(
+                    "Delete article failed: "
+                    f"article={article_id} not found"
+                )
+
+                return False
+
+            if not hasattr(
+                self.repo,
+                "delete",
+            ):
+
+                logger.error(
+                    "ArticleRepository.delete "
+                    "not implemented"
+                )
+
+                return False
+
+            success = self.repo.delete(
+                article_id
+            )
+
+            if not success:
+
+                logger.warning(
+                    "Article delete blocked or failed: "
+                    f"article={article_id}"
+                )
+
+                return False
+
+            logger.info(
+                "Article deleted: "
+                f"article={article_id}"
+            )
+
+            return True
+
+        except Exception as e:
+
+            logger.exception(
+                "Delete article error: "
+                f"{e}"
+            )
+
+            return False
+
+    # ==================================================
+    #
+    # P3.2
     # Count
     #
     # ==================================================
 
     def count(
-        self
+        self,
     ):
+        """
+        Article Count。
+        """
 
         try:
 
@@ -1508,10 +1769,12 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Article count error: "
+                f"{e}"
+            )
 
             return 0
-
 
     # ==================================================
     #
@@ -1520,8 +1783,11 @@ class ArticleService:
     # ==================================================
 
     def close(
-        self
+        self,
     ):
+        """
+        關閉 Repository Database Connection。
+        """
 
         try:
 
@@ -1529,4 +1795,12 @@ class ArticleService:
 
         except Exception as e:
 
-            logger.error(e)
+            logger.exception(
+                "Article service close error: "
+                f"{e}"
+            )
+
+
+__all__ = [
+    "ArticleService",
+]
