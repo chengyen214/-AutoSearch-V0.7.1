@@ -1,0 +1,47 @@
+{
+    "test_time": "2026-08-18T11:59:16.000708",
+    "test_name": "AutoSearch V4 Async Groq End-to-End Test",
+    "provider": "groq",
+    "model": "openai/gpt-oss-120b",
+    "before": {
+        "WAITING": 12,
+        "RUNNING": 0,
+        "DONE": 240,
+        "FAILED": 3
+    },
+    "trigger": {
+        "triggered": true,
+        "elapsed_seconds": 0.221
+    },
+    "scheduler": {
+        "running": true,
+        "thread_alive": true,
+        "interval": 30,
+        "worker_pool": "AIWorkerPool(worker_count=1, running=False, lifecycle_completed=True)",
+        "worker_count": 1,
+        "active_workers": 0,
+        "completed_workers": 1,
+        "failed_workers": 0,
+        "worker_pool_running": false
+    },
+    "worker_pool": {
+        "running": false,
+        "lifecycle_completed": true,
+        "worker_count": 1,
+        "active_workers": 0,
+        "completed_workers": 1,
+        "failed_workers": 0
+    },
+    "after": {
+        "WAITING": 0,
+        "RUNNING": 0,
+        "DONE": 252,
+        "FAILED": 3
+    },
+    "groq_request_detected": true,
+    "async_pipeline_success": true,
+    "queue_drained": true,
+    "all_tasks_finished": true,
+    "error": null,
+    "elapsed_seconds": 263.888
+}

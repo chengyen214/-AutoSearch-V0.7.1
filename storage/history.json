@@ -46,5 +46,13 @@
         "new_documents": 38,
         "duplicate_documents": 10,
         "failed_documents": 22
+    },
+    {
+        "keyword": "IC semiconductor",
+        "time": "2026-08-18 11:45:50",
+        "total_results": 70,
+        "new_documents": 31,
+        "duplicate_documents": 18,
+        "failed_documents": 21
     }
 ]

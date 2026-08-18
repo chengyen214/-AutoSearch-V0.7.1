@@ -1,0 +1,55 @@
+{
+    "test_time": "2026-08-18T11:33:05.378010",
+    "test_name": "AutoSearch V4 Groq Pipeline Integration Test",
+    "groq_connected": true,
+    "provider": "groq",
+    "model": "openai/gpt-oss-120b",
+    "api_key_loaded": true,
+    "llm_request_success": true,
+    "json_parser_success": true,
+    "ai_analysis_success": true,
+    "pipeline_success": true,
+    "response": {
+        "status": "SUCCESS",
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b",
+        "message": "Official AIAnalysisService successfully completed Groq analysis."
+    },
+    "ai_analysis": {
+        "article_id": 0,
+        "summary": "台積電積極推進 2nm 先進製程並擴大 AI 晶片製造，滿足 NVIDIA 等公司對先進製程與封裝的需求，CoWoS 與 HBM 成為 AI 伺服器關鍵技術，提升 AI 產業供應鏈能力。",
+        "category": "Advanced Process",
+        "keywords": [
+            "TSMC",
+            "2nm",
+            "AI 晶片",
+            "NVIDIA",
+            "CoWoS",
+            "HBM"
+        ],
+        "entities": [
+            "TSMC",
+            "NVIDIA",
+            "2nm",
+            "AI 晶片",
+            "CoWoS",
+            "HBM",
+            "AI 伺服器"
+        ],
+        "relations": [
+            "TSMC -> develops -> 2nm",
+            "TSMC -> manufactures -> AI 晶片",
+            "NVIDIA -> demands -> 2nm",
+            "NVIDIA -> demands -> CoWoS",
+            "CoWoS -> used_in -> AI 伺服器",
+            "HBM -> used_in -> AI 伺服器"
+        ],
+        "importance": 8,
+        "ai_model": "openai/gpt-oss-120b",
+        "ai_version": "4.0",
+        "confidence": 0.8,
+        "status": "completed"
+    },
+    "elapsed_seconds": 3.575,
+    "error": null
+}

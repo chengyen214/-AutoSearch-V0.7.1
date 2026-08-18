@@ -48,17 +48,49 @@ WAITING
    v
 Worker.run_once()
    |
-   +----> processed > 0
+   +----> claim batch
    |          |
    |          v
-   |      continue
+   |      process batch
+   |          |
+   |          v
+   |      claim next batch
    |
-   +----> processed == 0
+   +----> no WAITING task
+              |
+              v
+        Worker.run_once()
+        returns
               |
               v
         Worker finished
 
+注意:
+
+Queue Drain 的實際邏輯由:
+
+    AIWorker.run_once()
+
+負責。
+
+AIWorkerPool 不再重複執行
+run_once() Queue Drain。
+
 因此:
+
+    AIWorker.run_once()
+        |
+        +--> claim_waiting_tasks()
+        +--> process_task()
+        +--> repeat
+        +--> no tasks
+        +--> return total_success
+
+AIWorkerPool 只負責:
+
+    Worker Thread Lifecycle
+    Worker Monitoring
+    Worker Failure Isolation
 
 Threshold 只負責「是否啟動」。
 
@@ -66,9 +98,12 @@ Threshold 只負責「是否啟動」。
 不再因為 WAITING < Threshold
 而提前停止。
 
-Pool 會持續處理 Queue，
-直到 Worker.run_once()
-回傳 0。
+Pool Worker 會呼叫:
+
+    AIWorker.run_once()
+
+由 Worker 自己持續處理
+WAITING Queue。
 
 P2.4.9 Reliability:
 
@@ -90,6 +125,7 @@ AIWorkerPool 不負責:
 - Database
 - Knowledge Processing
 - Worker Auto Recovery
+- Queue Drain Logic
 
 AIWorkerPool 負責:
 
@@ -99,8 +135,9 @@ AIWorkerPool 負責:
 - Worker 啟動 / 停止
 - Worker Failure Isolation
 - Worker Monitoring
-- Queue Drain
+- Worker Thread 管理
 """
+
 
 import threading
 
@@ -126,34 +163,31 @@ class AIWorkerPool:
         Worker Threads
             |
             v
-        run_once()
+        AIWorker.run_once()
             |
-            +------> processed > 0
-            |              |
-            |              v
-            |         run_once()
-            |              |
-            |              v
-            |         continue
+            v
+        Worker 自己 Drain Queue
             |
-            +------> processed == 0
-                           |
-                           v
-                    Worker 結束
-                           |
-                           v
-                Pool lifecycle completed
+            v
+        Queue Empty
+            |
+            v
+        run_once() return
+            |
+            v
+        Worker Thread 結束
+            |
+            v
+        Pool lifecycle completed
 
     Queue Drain 原則:
 
-        Worker.run_once()
-        每次處理一批 Task。
+        Queue Drain 完整責任
+        由 AIWorker.run_once()
+        負責。
 
-        只要回傳處理數量 > 0，
-        就繼續處理下一批。
-
-        回傳 0 時，
-        代表目前沒有更多可處理 Task。
+        AIWorkerPool 不再重複
+        呼叫 run_once()。
 
     Worker failure:
 
@@ -304,10 +338,10 @@ class AIWorkerPool:
         """
         統一 Worker.run_once() 回傳值。
 
-        正常情況:
+        AIWorker.run_once()
+        正常回傳:
 
             int
-                處理數量
 
         例如:
 
@@ -326,7 +360,7 @@ class AIWorkerPool:
         不允許負數。
 
         負數代表 Worker 回傳異常資料，
-        為避免 Queue Drain 無限執行，
+        為避免錯誤監控資料，
         一律視為 0。
         """
 
@@ -368,42 +402,51 @@ class AIWorkerPool:
         worker
     ):
         """
-        執行單一 Worker。
+        執行單一 Worker Thread。
 
-        P2.4.9 Queue Drain。
+        P2.4.9:
 
-        流程:
+        Queue Drain 已由:
 
-            run_once()
+            AIWorker.run_once()
+
+        負責。
+
+        Pool 不再執行:
+
+            while True:
+                worker.run_once()
+
+        避免：
+
+            Pool Queue Drain
+                +
+            Worker Queue Drain
+
+        造成雙重 Queue Drain。
+
+        正確流程:
+
+            Worker Thread
                 |
                 v
-            processed
+            worker.run_once()
                 |
-                +----> > 0
-                |        |
-                |        v
-                |    continue
+                v
+            AIWorker 自己持續：
                 |
-                +----> 0
-                         |
-                         v
-                       stop
-
-        每次 run_once()
-        都代表一個 AI Task Batch。
-
-        例如:
-
-            Batch 1 -> 10
-            Batch 2 -> 10
-            Batch 3 -> 10
-            Batch 4 -> 10
-            Batch 5 -> 5
-            Batch 6 -> 0
-
-        最終:
-
-            Worker finished
+                +--> claim batch
+                +--> process batch
+                +--> claim next batch
+                +--> process
+                +--> ...
+                +--> no WAITING task
+                |
+                v
+            return total_success
+                |
+                v
+            Worker completed
 
         Worker failure:
 
@@ -424,76 +467,23 @@ class AIWorkerPool:
             )
 
             # ------------------------------------------
-            # Queue Drain Loop
+            # Execute Worker Lifecycle
             # ------------------------------------------
 
-            batch_number = 0
+            result = (
+                worker.run_once()
+            )
 
-            total_processed = 0
-
-            while True:
-
-                # --------------------------------------
-                # Stop Request
-                # --------------------------------------
-
-                with self.lock:
-
-                    if not self.running:
-
-                        logger.info(
-                            "AI Worker Pool worker "
-                            "received stop request"
-                        )
-
-                        break
-
-                # --------------------------------------
-                # Execute One Batch
-                # --------------------------------------
-
-                batch_number += 1
-
-                result = (
-                    worker.run_once()
+            processed = (
+                self._normalize_worker_result(
+                    result
                 )
+            )
 
-                processed = (
-                    self._normalize_worker_result(
-                        result
-                    )
-                )
-
-                # --------------------------------------
-                # Batch Result
-                # --------------------------------------
-
-                logger.info(
-                    "AI Worker Pool worker "
-                    f"batch={batch_number} "
-                    f"processed={processed}"
-                )
-
-                # --------------------------------------
-                # Queue Empty
-                # --------------------------------------
-
-                if processed == 0:
-
-                    logger.info(
-                        "AI Worker Pool worker "
-                        "queue drained"
-                    )
-
-                    break
-
-                # --------------------------------------
-                # Accumulate
-                # --------------------------------------
-
-                total_processed += (
-                    processed
-                )
+            logger.info(
+                "AI Worker Pool worker "
+                f"completed processed={processed}"
+            )
 
             # ------------------------------------------
             # Successful Worker Completion
@@ -502,11 +492,6 @@ class AIWorkerPool:
             with self.lock:
 
                 self.completed_workers += 1
-
-            logger.info(
-                "AI Worker Pool worker completed "
-                f"total_processed={total_processed}"
-            )
 
         except Exception as e:
 
@@ -546,15 +531,50 @@ class AIWorkerPool:
         判斷目前 Pool Lifecycle
         是否已經全部完成。
 
-        所有 Worker Thread
-        都結束後:
+        重要：
 
+        此方法可能由 Worker Thread 自己呼叫。
+
+        因此不能單純：
+
+            thread.is_alive()
+
+        因為目前 Worker Thread
+        在執行 finally 時本身仍然是 alive。
+
+        正確判斷：
+
+            排除 current_thread()
+
+        流程:
+
+            Worker A 完成
+                |
+                v
+            current_thread = A
+                |
+                v
+            A 不計入 alive
+                |
+                v
+            Worker B / C 若仍 alive
+                |
+                v
+            Pool 繼續 running
+
+        最後一個 Worker:
+
+            Worker A 完成
+                |
+                v
+            A 不計入 alive
+                |
+                v
+            沒有其他 Worker
+                |
+                v
             running = False
-
             lifecycle_completed = True
-
-        Scheduler 可以利用這個狀態
-        判斷 Pool 已經完成。
         """
 
         with self.lock:
@@ -563,9 +583,28 @@ class AIWorkerPool:
 
                 return
 
+            current_thread = (
+                threading.current_thread()
+            )
+
+            # ------------------------------------------
+            # Check Other Worker Threads
+            #
+            # 關鍵修正：
+            #
+            # 排除目前正在執行
+            # _check_lifecycle_completion()
+            # 的 Worker Thread。
+            # ------------------------------------------
+
             alive = any(
-                thread.is_alive()
+
+                thread is not current_thread
+
+                and thread.is_alive()
+
                 for thread in self.threads
+
             )
 
             if alive:
@@ -573,7 +612,7 @@ class AIWorkerPool:
                 return
 
             # ------------------------------------------
-            # All Workers Finished
+            # All Other Workers Finished
             # ------------------------------------------
 
             self.running = False
@@ -601,10 +640,13 @@ class AIWorkerPool:
             Worker Threads
                 |
                 v
-            run_once()
+            AIWorker.run_once()
                 |
                 v
-            Queue Drain
+            Worker 自己 Drain Queue
+                |
+                v
+            Worker 完成
                 |
                 v
             lifecycle completed
@@ -666,10 +708,15 @@ class AIWorkerPool:
                 for worker in self.workers:
 
                     thread = threading.Thread(
+
                         target=self._run_worker,
+
                         args=(worker,),
+
                         name="AI-Worker",
+
                         daemon=True
+
                     )
 
                     self.threads.append(
@@ -713,13 +760,20 @@ class AIWorkerPool:
         不強制 terminate Worker。
 
         Worker 收到 stop request 後，
-        會在目前 run_once() 完成後
-        結束。
+        會在目前 AIWorker.run_once()
+        完成後結束。
 
         注意:
 
+        AIWorker.run_once()
+        本身負責 Queue Drain。
+
         如果 Worker 正在執行 AI Analysis，
         stop() 不會中斷該分析。
+
+        同樣地，
+        stop() 不會強制中斷
+        AIWorker.run_once()。
         """
 
         try:
@@ -865,14 +919,20 @@ class AIWorkerPool:
         Worker Thread 數量。
         """
 
-        threads = list(
-            self.threads
-        )
+        with self.lock:
+
+            threads = list(
+                self.threads
+            )
 
         return sum(
+
             1
+
             for thread in threads
+
             if thread.is_alive()
+
         )
 
     # ==================================================
@@ -894,6 +954,11 @@ class AIWorkerPool:
         仍然只算：
 
             completed_workers = 1
+
+        因為 Queue Drain
+        已經由同一個
+        AIWorker.run_once()
+        完成。
         """
 
         with self.lock:

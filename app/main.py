@@ -4,9 +4,19 @@ app/main.py
 AutoSearch V4
 
 P2.4 Async AI Scaling Integration
+P2.4 Startup Queue Recovery
+P2.4 Persistent AI Queue Resume
 
 Pipeline:
 
+Application Start
+↓
+Startup Queue Recovery
+↓
+RUNNING -> WAITING
+↓
+Existing WAITING Queue Detection
+↓
 Keyword
 ↓
 ArticleService
@@ -27,7 +37,7 @@ ai_tasks WAITING
 ↓
 AIBatchTriggerService
 ↓
-Batch Threshold
+Batch Threshold / Existing Queue Resume
 ↓
 AIScheduler
 ↓
@@ -46,23 +56,105 @@ Search Index
 
 P2.4 Architecture:
 
-AIBatchTriggerService
+Startup
+        |
+        v
+Queue Recovery
+        |
+        v
+RUNNING -> WAITING
+        |
+        v
+Existing Queue Detection
+        |
+        +----------------------+
+        |                      |
+        v                      v
+Existing Queue > 0        No Existing Queue
+        |                      |
+        v                      v
+Force Trigger          AI_THRESHOLD Trigger
+        |                      |
+        +----------+-----------+
+                   |
+                   v
+              AIScheduler
+                   |
+                   v
+              AIWorkerPool
+             /      |      \
+            v       v       v
+         Worker   Worker   Worker
+            \       |       /
+             +------+------+
+                    |
+                    v
+               AI Analysis
+                    |
+                    v
+              Queue Drain
+                    |
+                    v
+              WAITING = 0
+
+
+P2.4 Startup Queue Recovery:
+
+Previous Process
+        |
+        v
+RUNNING Tasks
+        |
+        | process interrupted
+        v
+Application Restart
+        |
+        v
+recover_running_tasks()
+        |
+        v
+RUNNING -> WAITING
+        |
+        v
+Resume Queue
+
+
+P2.4 Existing Queue Rule:
+
+如果 Application 啟動前
+資料庫已經存在 WAITING Task，
+
+即使:
+
+    WAITING < AI_THRESHOLD
+
+也必須 Resume。
+
+因此:
+
+    Existing Queue
         ↓
-AIScheduler
+    Force Trigger
+
+而不是:
+
+    Existing Queue
         ↓
-AIWorkerPool
-   ┌────┼────┐
-   ↓    ↓    ↓
- Worker Worker Worker
-   └────┼────┘
-        ↓
-   AI Analysis
+    Threshold Check
+
+
+AI_THRESHOLD 只負責：
+
+    本次啟動後新產生的 Queue
+    是否達到自動啟動門檻。
 
 
 注意:
 
 本 Application 負責：
 
+- Startup Queue Recovery
+- Existing AI Queue Resume
 - 啟動 Article Pipeline
 - 建立 AI Task
 - Trigger Async AI Pipeline
@@ -81,44 +173,66 @@ AIWorkerPool
 - Knowledge Processing Logic
 """
 
+
 import time
 
+
 from config.keywords import SEARCH_KEYWORDS
+
+
+from config.settings import (
+    AI_THRESHOLD
+)
+
+
+from database.ai_task_repository import (
+    AITaskRepository
+)
+
 
 from services.article_service import (
     ArticleService
 )
 
+
 from services.ai_scheduler import (
     AIScheduler
 )
+
 
 from services.ai_batch_trigger_service import (
     AIBatchTriggerService
 )
 
+
 from services.knowledge_intelligence_service import (
     KnowledgeIntelligenceService
 )
 
+
 from exporter.excel import export
+
 
 from utils.history import save_history
 
+
 from utils.logger import logger
 
-from config.settings import (
-    AI_THRESHOLD
-)
+
 class AutoSearchApplication:
 
     """
     AutoSearch V4 Application
 
     P2.4 Async AI Scaling Integration
+    P2.4 Startup Queue Recovery
 
     負責將：
 
+        Startup Recovery
+            ↓
+        Existing Queue Resume
+            ↓
         Article Pipeline
             ↓
         Batch Trigger
@@ -146,18 +260,24 @@ class AutoSearchApplication:
         ----------
 
         ai_threshold:
-            WAITING AI Task 啟動門檻。
-
-            Default:
-                50
+            WAITING AI Task
+            新 Queue 自動啟動門檻。
 
         ai_wait_interval:
             等待 AI Worker Pool 完成時的
             Polling 間隔，單位秒。
-
-            Default:
-                0.1
         """
+
+        # ----------------------------------------------
+        # AI Task Repository
+        # ----------------------------------------------
+        #
+        # P2.4 Startup Queue Recovery
+        #
+
+        self.ai_task_repository = (
+            AITaskRepository()
+        )
 
         # ----------------------------------------------
         # Article Pipeline
@@ -215,6 +335,198 @@ class AutoSearchApplication:
         self.knowledge_service = (
             KnowledgeIntelligenceService()
         )
+
+    # ==================================================
+    # Recover Startup AI Queue
+    # ==================================================
+
+    def _recover_startup_ai_queue(
+        self
+    ):
+        """
+        P2.4 Startup Queue Recovery。
+
+        Application 啟動時：
+
+            RUNNING
+                |
+                v
+            WAITING
+
+        用途：
+
+        如果前一次程序因為：
+
+            Ctrl+C
+            Process Crash
+            Terminal 關閉
+            Machine Restart
+
+        導致 AI Task 卡在：
+
+            RUNNING
+
+        本次啟動時自動恢復。
+
+        同時記錄：
+
+            Application 啟動前
+            是否已經存在 WAITING Task。
+
+        這樣可以區分：
+
+            舊 Queue Resume
+
+        與：
+
+            本次新產生 Queue
+        """
+
+        try:
+
+            # ==========================================
+            # Step 1
+            # Count RUNNING
+            # ==========================================
+
+            running_before = (
+                self.ai_task_repository
+                .count_running_tasks()
+            )
+
+            logger.info(
+                "Startup AI Queue Recovery: "
+                f"running={running_before}"
+            )
+
+            # ==========================================
+            # Step 2
+            # Recover RUNNING
+            # ==========================================
+
+            recovered = 0
+
+            if running_before > 0:
+
+                recovered = (
+                    self.ai_task_repository
+                    .recover_running_tasks()
+                )
+
+                logger.info(
+                    "Startup AI Queue Recovery completed: "
+                    f"recovered={recovered}"
+                )
+
+            else:
+
+                logger.info(
+                    "Startup AI Queue Recovery: "
+                    "no RUNNING tasks"
+                )
+
+            # ==========================================
+            # Step 3
+            # Count Existing WAITING
+            # ==========================================
+
+            waiting_after_recovery = (
+                self.ai_task_repository
+                .count_waiting_tasks()
+            )
+
+            logger.info(
+                "Startup AI Queue state: "
+                f"waiting={waiting_after_recovery}, "
+                f"recovered={recovered}"
+            )
+
+            return {
+                "running_before": (
+                    running_before
+                ),
+
+                "recovered": (
+                    recovered
+                ),
+
+                "waiting": (
+                    waiting_after_recovery
+                )
+
+            }
+
+        except Exception as e:
+
+            logger.exception(
+                "Startup AI Queue Recovery failed: "
+                f"{e}"
+            )
+
+            return {
+
+                "running_before": 0,
+
+                "recovered": 0,
+
+                "waiting": 0,
+
+                "error": True
+
+            }
+
+    # ==================================================
+    # Check Existing AI Queue
+    # ==================================================
+
+    def _has_existing_ai_queue(
+        self
+    ):
+        """
+        判斷 Application 啟動時
+        是否已經存在 WAITING AI Queue。
+
+        注意：
+
+        這個判斷代表：
+
+            本次 run.py 啟動之前
+            Queue 就已經存在。
+
+        一旦成立：
+
+            不受 AI_THRESHOLD 限制。
+
+        直接 Resume。
+        """
+
+        try:
+
+            waiting = (
+                self.ai_task_repository
+                .count_waiting_tasks()
+            )
+
+            result = (
+                waiting > 0
+            )
+
+            logger.info(
+                "Existing AI Queue check: "
+                f"waiting={waiting}, "
+                f"existing={result}"
+            )
+
+            return result
+
+        except Exception as e:
+
+            logger.exception(
+                "Existing AI Queue check failed: "
+                f"{e}"
+            )
+
+            return False
 
     # ==================================================
     # Collect Articles
@@ -326,7 +638,7 @@ class AutoSearchApplication:
         return articles
 
     # ==================================================
-    # Start Async AI
+    # Start Async AI - Threshold Mode
     # ==================================================
 
     def _start_async_ai(
@@ -335,31 +647,19 @@ class AutoSearchApplication:
         """
         啟動 P2.4 Async AI Scaling。
 
-        Flow:
+        此方法只處理：
 
-            WAITING AI Tasks
-                    ↓
+            本次新 Queue
+
+        使用：
+
             AIBatchTriggerService
-                    ↓
-              Threshold Check
-                    ↓
-                AIScheduler
-                    ↓
-               AIWorkerPool
-                    ↓
-              Multiple Workers
+            + AI_THRESHOLD
 
         Returns
         -------
 
         bool
-
-            True:
-                Scheduler 已啟動或已經執行
-
-            False:
-                Threshold 尚未達成
-                或啟動失敗
         """
 
         logger.info(
@@ -386,6 +686,91 @@ class AutoSearchApplication:
         return result
 
     # ==================================================
+    # Resume Existing Async AI
+    # ==================================================
+
+    def _resume_existing_async_ai(
+        self
+    ):
+        """
+        P2.4 Existing Queue Resume。
+
+        與一般 Threshold Trigger
+        不同。
+
+        Existing Queue：
+
+            WAITING > 0
+                |
+                v
+            Force Trigger
+                |
+                v
+            AIScheduler
+                |
+                v
+            AIWorkerPool
+
+        不受 AI_THRESHOLD 限制。
+
+        Returns
+        -------
+
+        bool
+        """
+
+        try:
+
+            waiting = (
+                self.ai_task_repository
+                .count_waiting_tasks()
+            )
+
+            if waiting <= 0:
+
+                logger.info(
+                    "No existing AI Queue "
+                    "to resume"
+                )
+
+                return False
+
+            logger.info(
+                "Resuming existing AI Queue: "
+                f"waiting={waiting}"
+            )
+
+            result = (
+                self.ai_batch_trigger
+                .force_trigger()
+            )
+
+            if result:
+
+                logger.info(
+                    "Existing AI Queue "
+                    "resume triggered"
+                )
+
+            else:
+
+                logger.warning(
+                    "Existing AI Queue "
+                    "resume failed"
+                )
+
+            return result
+
+        except Exception as e:
+
+            logger.exception(
+                "Resume existing AI Queue failed: "
+                f"{e}"
+            )
+
+            return False
+
+    # ==================================================
     # Wait AI Completion
     # ==================================================
 
@@ -393,45 +778,15 @@ class AutoSearchApplication:
         self
     ):
         """
-        等待本次 AI Worker Pool 完成。
+        等待 AI Worker Pool 完成。
 
-        目的：
-
-        避免：
-
-            AI Worker
-                ↓
-            Background Thread
-                ↓
-            Application 提前結束
-
-        導致：
-
-            Knowledge Intelligence
-                ↓
-            在 AI Analysis 尚未完成時執行。
-
-        注意：
-
-        本方法不負責 Worker Lifecycle。
-
-        Worker Lifecycle 仍由：
-
-            AIWorkerPool
-
-        負責。
+        Worker Lifecycle
+        仍由 AIWorkerPool 負責。
 
         Returns
         -------
 
         bool
-
-            True:
-                AI Pool 已完成
-
-            False:
-                Scheduler / Pool 尚未啟動
-                或等待發生錯誤
         """
 
         scheduler = (
@@ -500,6 +855,17 @@ class AutoSearchApplication:
                 )
 
                 # --------------------------------------
+                # Lifecycle Completed
+                # --------------------------------------
+
+                lifecycle_completed = (
+                    status.get(
+                        "lifecycle_completed",
+                        False
+                    )
+                )
+
+                # --------------------------------------
                 # Not Started
                 # --------------------------------------
 
@@ -519,7 +885,13 @@ class AutoSearchApplication:
                 # Completed
                 # --------------------------------------
 
-                if active_workers == 0:
+                if (
+                    active_workers == 0
+                    and (
+                        lifecycle_completed
+                        or not pool_running
+                    )
+                ):
 
                     logger.info(
                         "AI Worker Pool "
@@ -565,11 +937,6 @@ class AutoSearchApplication:
         """
         停止本次 Application 啟動的
         Async AI Scheduler。
-
-        Returns
-        -------
-
-        bool
         """
 
         try:
@@ -620,13 +987,14 @@ class AutoSearchApplication:
 
         Flow:
 
-            1. Article Collection
-            2. AI Task Creation
-            3. Batch Trigger
-            4. Async AI Scaling
-            5. AI Worker Pool
-            6. Knowledge Intelligence
-            7. Export
+            1. Startup Queue Recovery
+            2. Existing Queue Detection
+            3. Article Collection
+            4. Existing Queue Resume
+            5. New Queue Threshold Trigger
+            6. AI Worker Pool
+            7. Knowledge Intelligence
+            8. Export
 
         Returns
         -------
@@ -646,7 +1014,62 @@ class AutoSearchApplication:
 
         ai_triggered = False
 
+        # ==============================================
+        #
+        # Startup Queue State
+        #
+        # ==============================================
+
+        startup_queue = {
+            "running_before": 0,
+            "recovered": 0,
+            "waiting": 0
+        }
+
+        existing_queue = False
+
         try:
+
+            # ==========================================
+            #
+            # Step 0
+            #
+            # Startup Queue Recovery
+            #
+            # ==========================================
+
+            logger.info(
+                "Starting AI Queue Recovery"
+            )
+
+            startup_queue = (
+                self._recover_startup_ai_queue()
+            )
+
+            # ------------------------------------------
+            # Existing Queue
+            # ------------------------------------------
+
+            existing_queue = (
+                startup_queue.get(
+                    "waiting",
+                    0
+                ) > 0
+            )
+
+            if existing_queue:
+
+                logger.info(
+                    "Existing AI Queue detected: "
+                    f"waiting="
+                    f"{startup_queue['waiting']}"
+                )
+
+            else:
+
+                logger.info(
+                    "No existing AI Queue detected"
+                )
 
             # ==========================================
             #
@@ -664,7 +1087,7 @@ class AutoSearchApplication:
             #
             # Step 2
             #
-            # Async AI Scaling
+            # Async AI
             #
             # ==========================================
 
@@ -672,13 +1095,63 @@ class AutoSearchApplication:
                 "Start Async AI Scaling"
             )
 
-            ai_triggered = (
-                self._start_async_ai()
-            )
+            # ------------------------------------------
+            # Existing Queue Resume
+            # ------------------------------------------
+
+            if existing_queue:
+
+                ai_triggered = (
+                    self._resume_existing_async_ai()
+                )
+
+                if ai_triggered:
+
+                    logger.info(
+                        "Existing AI Queue "
+                        "successfully resumed"
+                    )
+
+                else:
+
+                    logger.warning(
+                        "Existing AI Queue "
+                        "could not be resumed"
+                    )
 
             # ------------------------------------------
-            # Wait For AI
+            # New Queue Threshold
             # ------------------------------------------
+            #
+            # 只有沒有既有 Queue 時，
+            # 才進入一般 Threshold Trigger。
+            #
+
+            else:
+
+                ai_triggered = (
+                    self._start_async_ai()
+                )
+
+                if ai_triggered:
+
+                    logger.info(
+                        "Async AI Scaling triggered"
+                    )
+
+                else:
+
+                    logger.info(
+                        "Async AI Scaling not triggered"
+                    )
+
+            # ==========================================
+            #
+            # Step 3
+            #
+            # Wait For AI
+            #
+            # ==========================================
 
             if ai_triggered:
 
@@ -702,15 +1175,24 @@ class AutoSearchApplication:
 
             else:
 
-                logger.info(
-                    "AI Batch Threshold "
-                    "not reached; "
-                    "AI Scheduler not started"
-                )
+                if existing_queue:
+
+                    logger.warning(
+                        "Existing AI Queue "
+                        "was not started"
+                    )
+
+                else:
+
+                    logger.info(
+                        "AI Batch Threshold "
+                        "not reached; "
+                        "AI Scheduler not started"
+                    )
 
             # ==========================================
             #
-            # Step 3
+            # Step 4
             #
             # Knowledge Intelligence
             #
@@ -756,7 +1238,7 @@ class AutoSearchApplication:
 
         # ==========================================
         #
-        # Step 4
+        # Step 5
         #
         # Export
         #
@@ -791,7 +1273,7 @@ class AutoSearchApplication:
 
 def main():
     """
-    Backward compatible Application entry.
+    Backward compatible Application entry。
     """
 
     app = (

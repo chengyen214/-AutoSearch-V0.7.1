@@ -4,6 +4,7 @@ database/ai_task_repository.py
 AutoSearch V4
 
 P2.4.1
+P2.4 Async AI Queue Recovery
 
 AI Task Queue Repository
 
@@ -11,11 +12,13 @@ AI Task Queue Repository
 
 1. 建立 AI Task
 2. 查詢 WAITING Task
-3. Claim AI Task
-4. 防止多 Worker 重複取得 Task
-5. 查詢 Task
-6. 更新 Task 狀態
-7. Retry 管理
+3. 查詢 RUNNING Task
+4. Claim AI Task
+5. 防止多 Worker 重複取得 Task
+6. 查詢 Task
+7. 更新 Task 狀態
+8. Retry 管理
+9. Startup Queue Recovery
 
 Table:
 
@@ -33,24 +36,39 @@ Task Lifecycle:
         |
         +------> FAILED
 
-P2.4.1 Queue 強化:
+P2.4 Queue Recovery:
 
-    Worker A
-        |
-        +--> claim Task
-        |
-        v
-      RUNNING
+    Application 啟動
+          |
+          v
+    檢查 RUNNING Tasks
+          |
+          v
+    前一次程序可能中斷
+          |
+          v
+    RUNNING -> WAITING
+          |
+          v
+    Scheduler Resume
+          |
+          v
+    Worker Queue Drain
 
-    Worker B
-        |
-        +--> claim 同一 Task
-        |
-        v
-      失敗
+注意:
 
-因此同一個 Task
-只能被一個 Worker Claim。
+Recovery 只負責恢復：
+
+    RUNNING -> WAITING
+
+不會處理：
+
+    DONE
+    FAILED
+    WAITING
+
+真正的 Task Processing
+仍由 AIWorker 負責。
 """
 
 
@@ -67,13 +85,13 @@ class AITaskRepository:
     負責:
 
         ai_tasks table CRUD
-
-    P2.4.1:
-
-        Task Queue
-        Task Claim
-        Worker Safety
+        Queue Claim
+        Queue Recovery
         Retry 基礎管理
+
+    P2.4:
+
+        Startup Queue Recovery
     """
 
     # ==================================================
@@ -96,44 +114,48 @@ class AITaskRepository:
 
         cursor = conn.cursor()
 
-        sql = """
-        INSERT INTO ai_tasks
-        (
-            article_id,
-            task_type,
-            status,
-            priority,
-            retry_count
-        )
-        VALUES
-        (
-            %s,
-            %s,
-            %s,
-            %s,
-            %s
-        )
-        """
+        try:
 
-        cursor.execute(
-            sql,
+            sql = """
+            INSERT INTO ai_tasks
             (
-                task.article_id,
-                task.task_type,
-                task.status,
-                task.priority,
-                task.retry_count
+                article_id,
+                task_type,
+                status,
+                priority,
+                retry_count
             )
-        )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            """
 
-        conn.commit()
+            cursor.execute(
+                sql,
+                (
+                    task.article_id,
+                    task.task_type,
+                    task.status,
+                    task.priority,
+                    task.retry_count
+                )
+            )
 
-        task.id = cursor.lastrowid
+            conn.commit()
 
-        cursor.close()
-        conn.close()
+            task.id = cursor.lastrowid
 
-        return task
+            return task
+
+        finally:
+
+            cursor.close()
+            conn.close()
 
     # ==================================================
     # Get Waiting Tasks
@@ -168,27 +190,31 @@ class AITaskRepository:
             dictionary=True
         )
 
-        sql = """
-        SELECT *
-        FROM ai_tasks
-        WHERE status='WAITING'
-        ORDER BY
-            priority DESC,
-            created_time ASC
-        LIMIT %s
-        """
+        try:
 
-        cursor.execute(
-            sql,
-            (
-                limit,
+            sql = """
+            SELECT *
+            FROM ai_tasks
+            WHERE status='WAITING'
+            ORDER BY
+                priority DESC,
+                created_time ASC
+            LIMIT %s
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    limit,
+                )
             )
-        )
 
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
 
-        cursor.close()
-        conn.close()
+        finally:
+
+            cursor.close()
+            conn.close()
 
         tasks = []
 
@@ -220,14 +246,9 @@ class AITaskRepository:
 
             AIBatchTriggerService
 
-        不取得完整 Task。
-
         直接使用:
 
             SELECT COUNT(*)
-
-        提高 Queue Threshold
-        檢查效率。
 
         Returns
         -------
@@ -243,20 +264,25 @@ class AITaskRepository:
             dictionary=True
         )
 
-        sql = """
-        SELECT COUNT(*) AS count
-        FROM ai_tasks
-        WHERE status='WAITING'
-        """
+        try:
 
-        cursor.execute(sql)
+            sql = """
+            SELECT COUNT(*) AS count
+            FROM ai_tasks
+            WHERE status='WAITING'
+            """
 
-        row = cursor.fetchone()
+            cursor.execute(sql)
 
-        cursor.close()
-        conn.close()
+            row = cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+            conn.close()
 
         if row is None:
+
             return 0
 
         return int(
@@ -266,6 +292,249 @@ class AITaskRepository:
             )
         )
 
+    # ==================================================
+    # Get Running Tasks
+    # ==================================================
+
+    def get_running_tasks(
+        self,
+        limit=None
+    ):
+        """
+        取得目前 RUNNING Tasks。
+
+        P2.4 Startup Recovery。
+
+        用途:
+
+            Application 啟動時
+            檢查上一個程序是否留下
+            未完成的 RUNNING Tasks。
+
+        注意:
+
+            本方法只查詢。
+
+        不會修改 Task 狀態。
+
+        Parameters
+        ----------
+
+        limit:
+            最大 Task 數量。
+
+            None:
+                取得全部 RUNNING Tasks
+
+        Returns
+        -------
+
+        list[AITask]
+        """
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            if limit is None:
+
+                sql = """
+                SELECT *
+                FROM ai_tasks
+                WHERE status='RUNNING'
+                ORDER BY
+                    priority DESC,
+                    created_time ASC
+                """
+
+                cursor.execute(sql)
+
+            else:
+
+                if limit < 1:
+
+                    limit = 1
+
+                sql = """
+                SELECT *
+                FROM ai_tasks
+                WHERE status='RUNNING'
+                ORDER BY
+                    priority DESC,
+                    created_time ASC
+                LIMIT %s
+                """
+
+                cursor.execute(
+                    sql,
+                    (
+                        limit,
+                    )
+                )
+
+            rows = cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+            conn.close()
+
+        tasks = []
+
+        for row in rows:
+
+            task = self._row_to_model(
+                row
+            )
+
+            tasks.append(
+                task
+            )
+
+        return tasks
+
+    # ==================================================
+    # Count Running Tasks
+    # ==================================================
+
+    def count_running_tasks(
+        self
+    ):
+        """
+        取得目前 RUNNING AI Task 數量。
+
+        P2.4 Startup Recovery / Monitoring。
+        """
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            sql = """
+            SELECT COUNT(*) AS count
+            FROM ai_tasks
+            WHERE status='RUNNING'
+            """
+
+            cursor.execute(sql)
+
+            row = cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+            conn.close()
+
+        if row is None:
+
+            return 0
+
+        return int(
+            row.get(
+                "count",
+                0
+            )
+        )
+
+    # ==================================================
+    # Recover Running Tasks
+    # ==================================================
+
+    def recover_running_tasks(
+        self
+    ):
+        """
+        恢復上一個程序中斷時留下的 RUNNING Tasks。
+
+        P2.4 Startup Queue Recovery。
+
+        狀態轉換:
+
+            RUNNING
+                |
+                v
+            WAITING
+
+        用途:
+
+            python run.py
+                |
+                v
+            Application Startup
+                |
+                v
+            recover_running_tasks()
+                |
+                v
+            Scheduler Resume
+
+        安全原則:
+
+            只處理目前 status='RUNNING'
+            的 Task。
+
+        不會修改:
+
+            WAITING
+            DONE
+            FAILED
+
+        Returns
+        -------
+
+        int
+
+            本次成功恢復的 Task 數量。
+        """
+
+        conn = get_connection()
+
+        cursor = conn.cursor()
+
+        try:
+
+            sql = """
+            UPDATE ai_tasks
+            SET
+                status='WAITING',
+                finished_time=NULL
+            WHERE
+                status='RUNNING'
+            """
+
+            cursor.execute(sql)
+
+            affected = cursor.rowcount
+
+            conn.commit()
+
+            # ------------------------------------------------
+            # 使用 == 0 判斷
+            #
+            # 避免測試環境 MagicMock rowcount
+            # 造成比較問題。
+            # ------------------------------------------------
+
+            if affected is None:
+
+                return 0
+
+            return int(
+                affected
+            )
+
+        finally:
+
+            cursor.close()
+            conn.close()
 
     # ==================================================
     # Claim Task
@@ -290,24 +559,6 @@ class AITaskRepository:
 
         這個條件非常重要。
 
-        假設:
-
-            Worker A
-                |
-                +--> claim Task 1
-                |
-                v
-              RUNNING
-
-            Worker B
-                |
-                +--> claim Task 1
-                |
-                v
-              UPDATE 0 rows
-
-        因此 Worker B Claim 失敗。
-
         Returns
         -------
 
@@ -322,28 +573,32 @@ class AITaskRepository:
 
         cursor = conn.cursor()
 
-        sql = """
-        UPDATE ai_tasks
-        SET
-            status='RUNNING'
-        WHERE
-            id=%s
-            AND status='WAITING'
-        """
+        try:
 
-        cursor.execute(
-            sql,
-            (
-                task_id,
+            sql = """
+            UPDATE ai_tasks
+            SET
+                status='RUNNING'
+            WHERE
+                id=%s
+                AND status='WAITING'
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    task_id,
+                )
             )
-        )
 
-        affected = cursor.rowcount
+            affected = cursor.rowcount
 
-        conn.commit()
+            conn.commit()
 
-        cursor.close()
-        conn.close()
+        finally:
+
+            cursor.close()
+            conn.close()
 
         # ----------------------------------------------
         # Claim Failed
@@ -355,9 +610,10 @@ class AITaskRepository:
 
         # ----------------------------------------------
         # Claim Success
+        # ----------------------------------------------
         #
         # 重新取得最新 Task
-        # ----------------------------------------------
+        #
 
         return self.find_by_id(
             task_id
@@ -399,13 +655,6 @@ class AITaskRepository:
             claim_task()
 
         負責。
-
-        即使多個 Worker
-        同時取得相同候選 Task，
-        最終只有一個 Worker
-        能成功 UPDATE:
-
-            WAITING -> RUNNING
         """
 
         if limit is None or limit < 1:
@@ -452,23 +701,27 @@ class AITaskRepository:
             dictionary=True
         )
 
-        sql = """
-        SELECT *
-        FROM ai_tasks
-        WHERE id=%s
-        """
+        try:
 
-        cursor.execute(
-            sql,
-            (
-                task_id,
+            sql = """
+            SELECT *
+            FROM ai_tasks
+            WHERE id=%s
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    task_id,
+                )
             )
-        )
 
-        row = cursor.fetchone()
+            row = cursor.fetchone()
 
-        cursor.close()
-        conn.close()
+        finally:
+
+            cursor.close()
+            conn.close()
 
         if row is None:
 
@@ -500,71 +753,49 @@ class AITaskRepository:
         DONE 時自動寫入:
 
             finished_time
-
-        注意:
-
-        此方法是一般狀態更新 API。
-
-        Worker 若要 Claim Task，
-        必須使用:
-
-            claim_task()
-
-        不應直接使用:
-
-            update_status(
-                task_id,
-                "RUNNING"
-            )
         """
 
         conn = get_connection()
 
         cursor = conn.cursor()
 
-        if status == "DONE":
+        try:
 
-            sql = """
-            UPDATE ai_tasks
-            SET
-                status=%s,
-                finished_time=NOW()
-            WHERE id=%s
-            """
+            if status == "DONE":
 
-        else:
+                sql = """
+                UPDATE ai_tasks
+                SET
+                    status=%s,
+                    finished_time=NOW()
+                WHERE id=%s
+                """
 
-            sql = """
-            UPDATE ai_tasks
-            SET
-                status=%s
-            WHERE id=%s
-            """
+            else:
 
-        cursor.execute(
-            sql,
-            (
-                status,
-                task_id
+                sql = """
+                UPDATE ai_tasks
+                SET
+                    status=%s
+                WHERE id=%s
+                """
+
+            cursor.execute(
+                sql,
+                (
+                    status,
+                    task_id
+                )
             )
-        )
 
-        affected = cursor.rowcount
+            affected = cursor.rowcount
 
-        conn.commit()
+            conn.commit()
 
-        cursor.close()
-        conn.close()
+        finally:
 
-        # ------------------------------------------------
-        # 使用 == 1
-        #
-        # 避免 MagicMock rowcount
-        # 在測試環境出現:
-        #
-        # TypeError:
-        # '>' not supported ...
-        # ------------------------------------------------
+            cursor.close()
+            conn.close()
 
         return affected == 1
 
@@ -586,9 +817,6 @@ class AITaskRepository:
         必須確認原本狀態為:
 
             WAITING
-
-        因此可以避免多 Worker
-        同時處理相同 Task。
         """
 
         claimed = self.claim_task(
@@ -615,41 +843,39 @@ class AITaskRepository:
 
         只有 RUNNING Task
         才能進入 DONE。
-
-        這可以避免:
-
-            WAITING -> DONE
-
-        這種非法狀態跳轉。
         """
 
         conn = get_connection()
 
         cursor = conn.cursor()
 
-        sql = """
-        UPDATE ai_tasks
-        SET
-            status='DONE',
-            finished_time=NOW()
-        WHERE
-            id=%s
-            AND status='RUNNING'
-        """
+        try:
 
-        cursor.execute(
-            sql,
-            (
-                task_id,
+            sql = """
+            UPDATE ai_tasks
+            SET
+                status='DONE',
+                finished_time=NOW()
+            WHERE
+                id=%s
+                AND status='RUNNING'
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    task_id,
+                )
             )
-        )
 
-        affected = cursor.rowcount
+            affected = cursor.rowcount
 
-        conn.commit()
+            conn.commit()
 
-        cursor.close()
-        conn.close()
+        finally:
+
+            cursor.close()
+            conn.close()
 
         return affected == 1
 
@@ -681,29 +907,33 @@ class AITaskRepository:
 
         cursor = conn.cursor()
 
-        sql = """
-        UPDATE ai_tasks
-        SET
-            status='FAILED',
-            retry_count = retry_count + 1
-        WHERE
-            id=%s
-            AND status='RUNNING'
-        """
+        try:
 
-        cursor.execute(
-            sql,
-            (
-                task_id,
+            sql = """
+            UPDATE ai_tasks
+            SET
+                status='FAILED',
+                retry_count = retry_count + 1
+            WHERE
+                id=%s
+                AND status='RUNNING'
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    task_id,
+                )
             )
-        )
 
-        affected = cursor.rowcount
+            affected = cursor.rowcount
 
-        conn.commit()
+            conn.commit()
 
-        cursor.close()
-        conn.close()
+        finally:
+
+            cursor.close()
+            conn.close()
 
         return affected == 1
 
