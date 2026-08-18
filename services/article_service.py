@@ -159,8 +159,7 @@ from models.ai_task import (
     AITask,
 )
 
-
-from search.search_engine import (
+from search.search_adapter import (
     search,
 )
 
@@ -777,8 +776,7 @@ class ArticleService:
             # ==================================
 
             results = search(
-                keyword,
-                MAX_RESULTS,
+                keyword
             )
 
             total = len(
