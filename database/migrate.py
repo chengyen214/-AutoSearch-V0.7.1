@@ -71,8 +71,9 @@ MIGRATION_FILES = [
     "database/migration_v4_p2_2_5.sql",
 
     # P2.2.2 Archive Version History
-    "database/migration_v4_p2_2_2.sql"
-
+    "database/migration_v4_p2_2_2.sql",
+    
+    "database/migration_v4_p2_4_1.sql"
 
 ]
 

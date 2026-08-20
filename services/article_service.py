@@ -1,9 +1,10 @@
+# services/article_service.py
 """
 services/article_service.py
 
 AutoSearch V4
 
-P2.4.2 / P3.2
+P2.4.2 / P3.2 / P4 Compatibility
 
 Article Service
 
@@ -13,33 +14,37 @@ Article Service
 - Article Create
 - Raw HTML Archive
 - Archive Version History
-- History Detection
-- Article Query
+- Article Document Duplicate Detection
 - AI Task Creation
 - AI Task Batch Trigger
+- Article Query
 - Article Management
 
 Pipeline:
 
 Keyword
     ↓
-Search
+Search Adapter
     ↓
 Download
     ↓
+Raw HTML
+    ↓
 Parser
     ↓
-Article History Detection
+Article Document Detection
+    ↓
+Database Duplicate Detection
     ↓
 ArticleRepository
     ↓
 articles
     ↓
-ArchiveIntegration
-    ↓
 ArchiveService
-    ├── raw_documents
-    └── archive_versions
+    ├── MongoDB raw_html
+    ├── URL + HTML Hash Duplicate Detection
+    ├── MySQL raw_documents
+    └── MySQL archive_versions
     ↓
 AITaskRepository
     ↓
@@ -56,88 +61,129 @@ AIWorker
 Async AI Analysis
 
 
-Archive History:
+Important:
 
-New URL
-    ↓
-Article
-    ↓
-Version 1
+Article 必須先進入 SQL。
 
-Same URL + Same HTML
-    ↓
-Existing Article
-    ↓
-No New Version
-    ↓
-No AI Task
+AI Analysis 是非同步流程。
 
-Same URL + Changed HTML
-    ↓
-Existing Article
-    ↓
-Version 2
-    ↓
-AI Task WAITING
-    ↓
-Batch Trigger Check
-    ↓
-Version 3
-    ↓
-...
+因此:
+
+    Article
+        ↓
+    SQL
+        ↓
+    ArchiveService
+        ↓
+    MongoDB Raw HTML
+        ↓
+    MySQL Archive Metadata
+        ↓
+    AI Task
+        ↓
+    AI Worker
+        ↓
+    AI Analysis
 
 
-P3.2 Article Management:
+HTML Storage Policy:
 
-Article Query
-    ├── get_all()
-    ├── get_by_id()
-    ├── get_by_keyword()
-    └── get_by_source()
+原始 HTML 本體:
 
-AI Query
-    ├── get_by_importance()
-    ├── get_by_category()
-    ├── get_by_ai_keyword()
-    └── get_ai_top()
+    MongoDB
+        ↓
+    raw_html
 
-Article Management
-    ├── update_article()
-    ├── delete_article()
-    └── count()
+MySQL:
+
+    raw_documents
+    archive_versions
+
+只保存：
+
+    MongoDB Reference
+    URL
+    Content Hash
+    File Size
+    MIME Type
+    Version Information
+
+不再使用:
+
+    archive/html
 
 
-注意:
+Hash Responsibility:
+
+Article document_id
+    ↓
+generate_hash(title, parsed_content)
+    ↓
+Article Document Duplicate Detection
+
+Archive HTML
+    ↓
+ArchiveService
+    ↓
+generate_content_hash(raw_html)
+    ↓
+URL + HTML Hash
+    ↓
+Archive Version Duplicate Detection
+
+
+Important:
+
+document_id 與 archive file_hash 是兩個不同用途的 Hash。
+
+document_id:
+    - Article 文件識別
+    - Document duplicate detection
+    - 儲存於 articles.document_id
+    - 傳遞給 ArchiveService
+    - 用於 MongoDB Raw HTML Document Identity
+    - 不負責 Archive History
+
+file_hash:
+    - 原始 HTML 內容識別
+    - Archive Version History
+    - Archive Duplicate Detection
+
+
+Hash Policy:
+
+所有 SHA256 Hash 都集中於:
+
+    utils/hash.py
+
+ArticleService 不自行實作 SHA256。
+
+
+ArticleService Responsibility:
+
+- Article Collection
+- Article Document Duplicate Detection
+- Article SQL Persistence
+- ArchiveService 呼叫
+- AI Task Creation
+- AI Batch Trigger
+- Article Query
+- Article Management
+
 
 ArticleService 不負責:
 
+- Archive Duplicate Detection
+- Archive Hash Calculation
 - AI Analysis
 - AI Worker
 - AI Scheduler
 - Knowledge Processing
 - Parser Registration
 - Parser Selection
-- Parser Pipeline
 - RSS Normalization
 - Source Adapter
-- Source-specific Processing
-
-ArticleService 負責:
-
-- Article Collection
-- Article Create
-- Parser
-- Article History
-- Archive
-- AI Task Creation
-- AI Batch Trigger
-- Article Query
-- Article Management
 """
-
-
-import hashlib
-
 
 from config.settings import (
     MAX_RESULTS,
@@ -159,6 +205,13 @@ from models.ai_task import (
     AITask,
 )
 
+
+# ======================================
+# Search
+#
+# P4 Search Adapter Compatibility
+# ======================================
+
 from search.search_adapter import (
     search,
 )
@@ -174,14 +227,12 @@ from parser.parser import (
 )
 
 
+# ======================================
+# Article Document Hash
+# ======================================
+
 from utils.hash import (
     generate_hash,
-)
-
-
-from utils.duplicate import (
-    is_duplicate,
-    save_document,
 )
 
 
@@ -191,9 +242,7 @@ from utils.logger import (
 
 
 # ======================================
-#
 # Archive
-#
 # ======================================
 
 from services.archive_service import (
@@ -207,11 +256,9 @@ from archive.archive_integration import (
 
 
 # ======================================
-#
 # AI Batch Trigger
 #
 # P2.4.2
-#
 # ======================================
 
 from services.ai_batch_trigger_service import (
@@ -223,28 +270,55 @@ class ArticleService:
     """
     Article Service
 
-    P2.4.2 + P3.2
+    P2.4.2 + P3.2 + P4 Compatibility
+
+    核心原則:
+
+        Article 資料先進 SQL。
+
+        原始 HTML 由 ArchiveService
+        儲存到 MongoDB。
+
+        AI Analysis 後續非同步處理。
+
+    Pipeline:
+
+        Search
+            ↓
+        Download
+            ↓
+        Raw HTML
+            ↓
+        Parse
+            ↓
+        Article
+            ↓
+        Article SQL
+            ↓
+        ArchiveService
+            ↓
+        MongoDB Raw HTML
+            ↓
+        MySQL Archive Metadata
+            ↓
+        AI Task WAITING
+            ↓
+        Batch Trigger
+            ↓
+        Scheduler / Worker
+            ↓
+        AI Analysis
 
     負責:
 
         Article Collection
-        Archive History
+        Article Document Detection
+        Article SQL Persistence
+        Archive Integration
         AI Task Creation
         AI Batch Trigger
         Article Query
         Article Management
-
-    不負責:
-
-        AI Analysis
-        AI Worker
-        AI Scheduler
-        Knowledge Processing
-        Parser Registration
-        Parser Selection
-        Parser Pipeline
-        RSS Normalization
-        Source Adapter
     """
 
     # ==================================================
@@ -273,88 +347,36 @@ class ArticleService:
         - AIBatchTriggerService
         """
 
-        # ==================================
-        #
-        # Article Repository
-        #
-        # ==================================
-
         if repo is None:
-
             repo = ArticleRepository()
 
         self.repo = repo
 
-        # ==================================
-        #
-        # AI Task Repository
-        #
-        # ==================================
-
         if task_repo is None:
-
             task_repo = AITaskRepository()
 
         self.task_repo = task_repo
 
-        # ==================================
-        #
-        # Archive Service
-        #
-        # ==================================
-
         if archive_service is None:
-
             archive_service = ArchiveService()
 
-        self.archive_service = (
-            archive_service
-        )
-
-        # ==================================
-        #
-        # Archive Integration
-        #
-        # P2.3
-        #
-        # ==================================
+        self.archive_service = archive_service
 
         if archive_integration is None:
-
-            archive_integration = (
-                ArchiveIntegration(
-                    archive_repository=(
-                        self.archive_service
-                        .version_repo
-                    )
+            archive_integration = ArchiveIntegration(
+                archive_repository=(
+                    self.archive_service.version_repo
                 )
             )
 
-        self.archive_integration = (
-            archive_integration
-        )
-
-        # ==================================
-        #
-        # AI Batch Trigger
-        #
-        # P2.4.2
-        #
-        # ==================================
+        self.archive_integration = archive_integration
 
         if batch_trigger is None:
-
-            batch_trigger = (
-                AIBatchTriggerService(
-                    task_repository=(
-                        self.task_repo
-                    )
-                )
+            batch_trigger = AIBatchTriggerService(
+                task_repository=self.task_repo
             )
 
-        self.batch_trigger = (
-            batch_trigger
-        )
+        self.batch_trigger = batch_trigger
 
     # ==================================================
     #
@@ -369,65 +391,48 @@ class ArticleService:
         """
         依 URL 找出既有 Article。
 
-        優先使用 Repository:
+        此方法只負責 Article Entity Lookup。
 
-            find_by_url()
-
-        若目前 Repository 尚未提供，
-
-        fallback:
-
-            find_all()
+        不負責 Archive Duplicate Detection。
         """
 
         try:
 
-            # ==================================
-            # Preferred Repository API
-            # ==================================
+            if not url:
+                return None
+
+            url = str(url).strip()
+
+            if not url:
+                return None
 
             if hasattr(
                 self.repo,
                 "find_by_url",
             ):
-
-                return self.repo.find_by_url(
-                    url
-                )
-
-            # ==================================
-            # Fallback
-            # ==================================
+                return self.repo.find_by_url(url)
 
             if hasattr(
                 self.repo,
                 "find_all",
             ):
 
-                articles = (
-                    self.repo.find_all()
-                )
+                articles = self.repo.find_all()
 
                 for item in articles:
 
-                    if isinstance(
+                    item_url = self._get_value(
                         item,
-                        dict,
-                    ):
+                        "url",
+                        None,
+                    )
 
-                        item_url = item.get(
-                            "url"
-                        )
+                    if item_url is None:
+                        continue
 
-                    else:
-
-                        item_url = getattr(
-                            item,
-                            "url",
-                            None,
-                        )
-
-                    if item_url == url:
+                    if str(
+                        item_url
+                    ).strip() == url:
 
                         return item
 
@@ -435,6 +440,92 @@ class ArticleService:
 
             logger.exception(
                 "Find existing article error: "
+                f"{e}"
+            )
+
+        return None
+
+    # ==================================================
+    #
+    # Find Existing Article By Document ID
+    #
+    # ==================================================
+
+    def _find_existing_article_by_document_id(
+        self,
+        document_id,
+    ):
+        """
+        依 document_id 查詢既有 Article。
+
+        document_id 只負責:
+
+            Article Document Duplicate Detection
+
+        不參與:
+
+            Archive Version Duplicate Detection
+        """
+
+        if not document_id:
+            return None
+
+        try:
+
+            document_id = str(
+                document_id
+            ).strip()
+
+            if not document_id:
+                return None
+
+            if hasattr(
+                self.repo,
+                "find_by_document_id",
+            ):
+                return self.repo.find_by_document_id(
+                    document_id
+                )
+
+            if hasattr(
+                self.repo,
+                "get_by_document_id",
+            ):
+                return self.repo.get_by_document_id(
+                    document_id
+                )
+
+            if hasattr(
+                self.repo,
+                "find_all",
+            ):
+
+                articles = self.repo.find_all()
+
+                for item in articles:
+
+                    existing_document_id = (
+                        self._get_value(
+                            item,
+                            "document_id",
+                            None,
+                        )
+                    )
+
+                    if existing_document_id is None:
+                        continue
+
+                    if str(
+                        existing_document_id
+                    ).strip() == document_id:
+
+                        return item
+
+        except Exception as e:
+
+            logger.exception(
+                "Find existing article by document_id "
+                "error: "
                 f"{e}"
             )
 
@@ -455,17 +546,13 @@ class ArticleService:
         """
 
         if article is None:
-
             return None
 
         if isinstance(
             article,
             dict,
         ):
-
-            return article.get(
-                "id"
-            )
+            return article.get("id")
 
         return getattr(
             article,
@@ -475,33 +562,68 @@ class ArticleService:
 
     # ==================================================
     #
-    # Generate Archive File Hash
+    # Get Object / Dict Value
     #
     # ==================================================
 
     @staticmethod
-    def _get_html_hash(
-        html,
+    def _get_value(
+        obj,
+        key,
+        default=None,
     ):
         """
-        計算與 ArchiveService 一致的
-        HTML File Hash。
+        同時支援:
+
+            object
+            dict
         """
 
-        if html is None:
+        if obj is None:
+            return default
 
-            html = ""
-
-        if not isinstance(
-            html,
-            str,
+        if isinstance(
+            obj,
+            dict,
         ):
+            return obj.get(
+                key,
+                default,
+            )
 
-            html = str(html)
+        return getattr(
+            obj,
+            key,
+            default,
+        )
 
-        return hashlib.sha256(
-            html.encode("utf-8")
-        ).hexdigest()
+    # ==================================================
+    #
+    # Generate Article Document Hash
+    #
+    # ==================================================
+
+    @staticmethod
+    def _get_document_hash(
+        title,
+        content,
+    ):
+        """
+        產生 Article Document Hash。
+
+        用途:
+
+            Article Document Duplicate Detection
+
+        Hash Source:
+
+            title + parsed content
+        """
+
+        return generate_hash(
+            title,
+            content,
+        )
 
     # ==================================================
     #
@@ -514,8 +636,12 @@ class ArticleService:
         article_id,
     ):
         """
-        透過 ArchiveIntegration
-        取得最新 Archive Version。
+        取得指定 Article 最新 Archive Version。
+
+        此方法只用於 Version History
+        與 Version Information。
+
+        不負責 Archive Duplicate Detection。
         """
 
         try:
@@ -526,39 +652,22 @@ class ArticleService:
             )
 
             if repository is None:
-
                 return None
-
-            # ==================================
-            # ArchiveVersionRepository API
-            # ==================================
 
             if hasattr(
                 repository,
                 "get_latest_version",
             ):
-
-                return (
-                    repository
-                    .get_latest_version(
-                        article_id
-                    )
+                return repository.get_latest_version(
+                    article_id
                 )
-
-            # ==================================
-            # Compatibility
-            # ==================================
 
             if hasattr(
                 repository,
                 "get_latest",
             ):
-
-                return (
-                    repository
-                    .get_latest(
-                        article_id
-                    )
+                return repository.get_latest(
+                    article_id
                 )
 
         except Exception as e:
@@ -572,89 +681,176 @@ class ArticleService:
 
     # ==================================================
     #
-    # Check Archive History
+    # Determine Archive Version Created
     #
     # ==================================================
 
-    def _check_archive_history(
+    def _is_new_archive_version(
         self,
-        article_id,
-        html,
+        previous_version,
+        saved_version,
     ):
         """
-        判斷 Article 是否需要建立新的
-        Archive Version。
-
-        使用:
-
-            HTML SHA256
-                ↓
-            latest archive_versions.file_hash
-                ↓
-            比較
+        判斷 ArchiveService.save_html()
+        是否真的建立新的 Archive Version。
         """
 
-        file_hash = (
-            self._get_html_hash(
-                html
-            )
-        )
+        if saved_version is None:
+            return False
 
-        latest = (
-            self._get_latest_archive_version(
-                article_id
-            )
-        )
+        if previous_version is None:
+            return True
 
-        # ==================================
-        # No History
-        # ==================================
-
-        if latest is None:
-
-            return {
-                "exists": False,
-                "changed": True,
-                "latest_version": None,
-                "latest_version_number": None,
-                "file_hash": file_hash,
-            }
-
-        # ==================================
-        # Existing History
-        # ==================================
-
-        old_hash = getattr(
-            latest,
-            "file_hash",
-            None,
-        )
-
-        changed = (
-            old_hash != file_hash
-        )
-
-        latest_version_number = getattr(
-            latest,
+        previous_number = self._get_value(
+            previous_version,
             "version_number",
             None,
         )
 
-        return {
-            "exists": True,
-            "changed": changed,
-            "latest_version": latest,
-            "latest_version_number": (
-                latest_version_number
-            ),
-            "file_hash": file_hash,
-        }
+        saved_number = self._get_value(
+            saved_version,
+            "version_number",
+            None,
+        )
+
+        if (
+            previous_number is None
+            or saved_number is None
+        ):
+
+            logger.warning(
+                "Unable to determine archive version "
+                "creation status: "
+                f"previous={previous_number}, "
+                f"saved={saved_number}"
+            )
+
+            return False
+
+        try:
+
+            return int(
+                saved_number
+            ) > int(
+                previous_number
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return False
+
+    # ==================================================
+    #
+    # Persist Existing Article Snapshot
+    #
+    # ==================================================
+
+    def _update_existing_article_snapshot(
+        self,
+        article_id,
+        article,
+    ):
+        """
+        更新既有 Article 的目前 SQL Snapshot。
+
+        Archive History:
+
+            ArchiveService
+
+        Article Current Snapshot:
+
+            ArticleRepository
+        """
+
+        if article_id is None:
+            return False
+
+        if article is None:
+            return False
+
+        if not hasattr(
+            self.repo,
+            "update_content_snapshot",
+        ):
+
+            logger.error(
+                "ArticleRepository.update_content_snapshot "
+                "not implemented"
+            )
+
+            return False
+
+        try:
+
+            success = (
+                self.repo.update_content_snapshot(
+                    article_id=article_id,
+                    document_id=getattr(
+                        article,
+                        "document_id",
+                        "",
+                    ),
+                    content=getattr(
+                        article,
+                        "content",
+                        "",
+                    ),
+                    crawl_time=getattr(
+                        article,
+                        "crawl_time",
+                        None,
+                    ),
+                    status=getattr(
+                        article,
+                        "status",
+                        "Success",
+                    ),
+                )
+            )
+
+            if not success:
+
+                logger.error(
+                    "Article SQL snapshot update failed: "
+                    f"article={article_id}"
+                )
+
+                return False
+
+            if hasattr(
+                self.repo,
+                "update_ai_status",
+            ):
+
+                self.repo.update_ai_status(
+                    article_id,
+                    "pending",
+                )
+
+            logger.info(
+                "Article SQL snapshot updated: "
+                f"article={article_id}, "
+                f"document_id="
+                f"{getattr(article, 'document_id', '')}"
+            )
+
+            return True
+
+        except Exception as e:
+
+            logger.exception(
+                "Update existing article snapshot error: "
+                f"{e}"
+            )
+
+            return False
 
     # ==================================================
     #
     # Trigger AI Batch
-    #
-    # P2.4.2
     #
     # ==================================================
 
@@ -664,25 +860,15 @@ class ArticleService:
         """
         檢查 WAITING AI Task 數量。
 
-        AIBatchTriggerService 負責:
+        注意:
 
-            WAITING Queue
-                ↓
-            Threshold Check
-                ↓
-            Scheduler
-                ↓
-            Worker
+            這裡只負責通知 Batch Trigger。
 
-        ArticleService:
+            不直接啟動:
 
-            只負責通知 Batch Trigger。
-
-        ArticleService 不直接:
-
-            啟動 Scheduler
-            啟動 Worker
-            判斷 Threshold
+                Scheduler
+                Worker
+                AI Analyzer
         """
 
         try:
@@ -710,553 +896,35 @@ class ArticleService:
 
     # ==================================================
     #
-    # Collect Articles
+    # Search Results
+    #
+    # P4 Compatibility Boundary
     #
     # ==================================================
 
-    def create(
-        self,
+    @staticmethod
+    def _search(
         keyword,
     ):
         """
-        搜尋並建立 Articles。
+        ArticleService Search Boundary。
 
-        Pipeline:
+        ArticleService 不管理 Source Adapter。
 
-            Keyword
-                ↓
-            Search
-                ↓
-            Download
-                ↓
-            Parser
-                ↓
-            History Detection
-                ↓
-            ArticleRepository
-                ↓
-            Archive
-                ↓
-            AI Task WAITING
-                ↓
-            Batch Trigger
+        Search Adapter 負責:
 
-        Same URL + Same HTML:
-
-            No New Version
-            No AI Task
-
-        Same URL + Changed HTML:
-
-            New Archive Version
-            AI Task WAITING
-            Batch Trigger
-
-        New URL:
-
-            Article
-            Archive Version 1
-            AI Task WAITING
-            Batch Trigger
+            Source Registry
+            Source Adapter
+            Google News
+            Website Search
+            RSS
+            Search Result Deduplication
+            Per-Source Result Limit
         """
 
-        articles = []
-
-        total = 0
-        new = 0
-        duplicate = 0
-        failed = 0
-
-        try:
-
-            # ==================================
-            #
-            # Search
-            #
-            # ==================================
-
-            results = search(
-                keyword
-            )
-
-            total = len(
-                results
-            )
-
-            # ==================================
-            #
-            # Process Results
-            #
-            # ==================================
-
-            for item in results:
-
-                try:
-
-                    logger.info(
-                        f"Processing {item.title}"
-                    )
-
-                    # ==================================
-                    #
-                    # Download
-                    #
-                    # ==================================
-
-                    html = download(
-                        item.url,
-                        HEADERS,
-                    )
-
-                    if html is None:
-
-                        failed += 1
-
-                        logger.warning(
-                            "Download failed: "
-                            f"{item.url}"
-                        )
-
-                        continue
-
-                    # ==================================
-                    #
-                    # Parser
-                    #
-                    # ==================================
-
-                    article = parse(
-                        html,
-                        keyword,
-                    )
-
-                    if article is None:
-
-                        failed += 1
-
-                        logger.warning(
-                            "Parse failed: "
-                            f"{item.url}"
-                        )
-
-                        continue
-
-                    # ==================================
-                    #
-                    # Article Metadata
-                    #
-                    # ==================================
-
-                    article.keyword = keyword
-
-                    article.title = item.title
-
-                    article.url = item.url
-
-                    article.source = item.source
-
-                    article.published = (
-                        item.published
-                    )
-
-                    article.status = "Success"
-
-                    # ==================================
-                    #
-                    # Document ID
-                    #
-                    # ==================================
-
-                    article.document_id = (
-                        generate_hash(
-                            article.title,
-                            article.content,
-                        )
-                    )
-
-                    # ==================================
-                    #
-                    # Find Existing Article
-                    #
-                    # History Detection 必須優先於
-                    # Document Duplicate Detection。
-                    #
-                    # ==================================
-
-                    existing_article = (
-                        self
-                        ._find_existing_article_by_url(
-                            item.url
-                        )
-                    )
-
-                    existing_article_id = (
-                        self._get_article_id(
-                            existing_article
-                        )
-                    )
-
-                    # ==================================
-                    #
-                    # Existing Article
-                    #
-                    # ==================================
-
-                    if existing_article_id is not None:
-
-                        logger.info(
-                            "Existing article found: "
-                            f"article={existing_article_id}, "
-                            f"url={item.url}"
-                        )
-
-                        # ==================================
-                        #
-                        # History Detection
-                        #
-                        # ==================================
-
-                        history_result = (
-                            self
-                            ._check_archive_history(
-                                existing_article_id,
-                                html,
-                            )
-                        )
-
-                        # ==================================
-                        #
-                        # Same Content
-                        #
-                        # ==================================
-
-                        if not history_result[
-                            "changed"
-                        ]:
-
-                            duplicate += 1
-
-                            logger.info(
-                                "Archive unchanged: "
-                                f"article="
-                                f"{existing_article_id}, "
-                                f"version="
-                                f"{history_result['latest_version_number']}, "
-                                f"url={item.url}"
-                            )
-
-                            # 不建立:
-                            #
-                            # Article Version
-                            # AI Task
-                            # Batch Trigger
-
-                            continue
-
-                        # ==================================
-                        #
-                        # Content Changed
-                        #
-                        # ==================================
-
-                        logger.info(
-                            "Archive content changed: "
-                            f"article="
-                            f"{existing_article_id}, "
-                            f"old_version="
-                            f"{history_result['latest_version_number']}"
-                        )
-
-                        # ==================================
-                        #
-                        # Save New Document Hash
-                        #
-                        # ==================================
-
-                        if not is_duplicate(
-                            article.document_id
-                        ):
-
-                            save_document(
-                                article.document_id
-                            )
-
-                        # ==================================
-                        #
-                        # Save New Archive Version
-                        #
-                        # ==================================
-
-                        archive_version = (
-                            self.archive_service.save_html(
-                                article_id=(
-                                    existing_article_id
-                                ),
-                                url=item.url,
-                                html=html,
-                            )
-                        )
-
-                        if archive_version is None:
-
-                            failed += 1
-
-                            logger.error(
-                                "Archive failed for "
-                                f"existing article="
-                                f"{existing_article_id}"
-                            )
-
-                            continue
-
-                        # ==================================
-                        #
-                        # Archive Success
-                        #
-                        # ==================================
-
-                        logger.info(
-                            "Archive history updated: "
-                            f"article="
-                            f"{existing_article_id}, "
-                            f"version="
-                            f"{archive_version.version_number}"
-                        )
-
-                        # ==================================
-                        #
-                        # Create AI Task
-                        #
-                        # Content Changed
-                        # → 重新分析
-                        #
-                        # ==================================
-
-                        task = self.create_ai_task(
-                            existing_article_id
-                        )
-
-                        if task is None:
-
-                            logger.warning(
-                                "AI Task creation failed: "
-                                f"article="
-                                f"{existing_article_id}"
-                            )
-
-                        else:
-
-                            # ==================================
-                            #
-                            # P2.4.2 Batch Trigger
-                            #
-                            # ==================================
-
-                            self._trigger_ai_batch()
-
-                        # ==================================
-                        #
-                        # Result
-                        #
-                        # ==================================
-
-                        articles.append(
-                            existing_article
-                        )
-
-                        new += 1
-
-                        continue
-
-                    # ==================================
-                    #
-                    # New Article
-                    #
-                    # URL 從未存在
-                    #
-                    # ==================================
-
-                    logger.info(
-                        "New article detected: "
-                        f"url={item.url}"
-                    )
-
-                    # ==================================
-                    #
-                    # Document Duplicate Check
-                    #
-                    # ==================================
-
-                    if is_duplicate(
-                        article.document_id
-                    ):
-
-                        duplicate += 1
-
-                        logger.info(
-                            "Duplicate document: "
-                            f"{article.document_id}"
-                        )
-
-                        continue
-
-                    # ==================================
-                    #
-                    # Save Document Hash
-                    #
-                    # ==================================
-
-                    save_document(
-                        article.document_id
-                    )
-
-                    # ==================================
-                    #
-                    # Save Article First
-                    #
-                    # 必須先取得 Article ID
-                    #
-                    # ==================================
-
-                    saved = self.repo.insert(
-                        article
-                    )
-
-                    if saved is None:
-
-                        failed += 1
-
-                        logger.error(
-                            "Failed to save article"
-                        )
-
-                        continue
-
-                    # ==================================
-                    #
-                    # Archive Version 1
-                    #
-                    # ==================================
-
-                    archive_version = (
-                        self.archive_service.save_html(
-                            article_id=saved.id,
-                            url=item.url,
-                            html=html,
-                        )
-                    )
-
-                    # ==================================
-                    #
-                    # Archive 必須成功
-                    # 才建立 AI Task
-                    #
-                    # ==================================
-
-                    if archive_version is None:
-
-                        failed += 1
-
-                        logger.error(
-                            "Archive failed, "
-                            f"article={saved.id}. "
-                            "AI Task will not be created."
-                        )
-
-                        continue
-
-                    # ==================================
-                    #
-                    # Archive Success
-                    #
-                    # ==================================
-
-                    logger.info(
-                        "Archive completed: "
-                        f"article={saved.id}, "
-                        f"version="
-                        f"{archive_version.version_number}"
-                    )
-
-                    # ==================================
-                    #
-                    # Create AI Task
-                    #
-                    # ==================================
-
-                    task = self.create_ai_task(
-                        saved.id
-                    )
-
-                    if task is None:
-
-                        logger.warning(
-                            "AI Task creation failed: "
-                            f"article={saved.id}"
-                        )
-
-                    else:
-
-                        # ==================================
-                        #
-                        # P2.4.2 Batch Trigger
-                        #
-                        # 新 Article 建立 AI Task 後
-                        # 檢查 WAITING Queue。
-                        #
-                        # ==================================
-
-                        self._trigger_ai_batch()
-
-                    # ==================================
-                    #
-                    # Result
-                    #
-                    # ==================================
-
-                    articles.append(
-                        saved
-                    )
-
-                    new += 1
-
-                except Exception as e:
-
-                    failed += 1
-
-                    logger.exception(
-                        "Article processing error: "
-                        f"{e}"
-                    )
-
-            # ==================================
-            #
-            # Return
-            #
-            # ==================================
-
-            return {
-                "articles": articles,
-                "total": total,
-                "new": new,
-                "duplicate": duplicate,
-                "failed": failed,
-            }
-
-        except Exception as e:
-
-            logger.exception(
-                "Article create error: "
-                f"{e}"
-            )
-
-            return {
-                "articles": [],
-                "total": total,
-                "new": new,
-                "duplicate": duplicate,
-                "failed": failed,
-            }
+        return search(
+            keyword
+        )
 
     # ==================================================
     #
@@ -1271,11 +939,13 @@ class ArticleService:
         """
         建立 AI Analysis Task。
 
+        Article 必須已經存在 SQL。
+
         流程:
 
-            Article
+            articles
                 ↓
-            AITask
+            ai_tasks
                 ↓
             WAITING
                 ↓
@@ -1283,6 +953,15 @@ class ArticleService:
         """
 
         try:
+
+            if article_id is None:
+
+                logger.warning(
+                    "Cannot create AI Task without "
+                    "article_id"
+                )
+
+                return None
 
             task = AITask(
                 article_id=article_id,
@@ -1321,6 +1000,828 @@ class ArticleService:
             )
 
             return None
+
+    # ==================================================
+    #
+    # Collect Articles
+    #
+    # ==================================================
+
+    def create(
+        self,
+        keyword,
+    ):
+        """
+        搜尋並建立 Articles。
+
+        Pipeline:
+
+            Keyword
+                ↓
+            Search Adapter
+                ↓
+            Download
+                ↓
+            Raw HTML
+                ↓
+            Parser
+                ↓
+            document_id
+                ↓
+            Article Duplicate Detection
+                ↓
+            ArticleRepository
+                ↓
+            articles
+                ↓
+            ArchiveService
+                ↓
+            MongoDB raw_html
+                ↓
+            MySQL raw_documents
+                ↓
+            MySQL archive_versions
+                ↓
+            AITaskRepository
+                ↓
+            ai_tasks WAITING
+                ↓
+            AIBatchTriggerService
+                ↓
+            AIScheduler / AIWorker
+
+        核心原則:
+
+            Article SQL persistence
+                不依賴
+            Archive
+
+            Archive HTML
+                優先使用
+            Article.document_id
+
+            Raw HTML 本體
+                只儲存於 MongoDB
+
+            Archive failure
+                不刪除
+            Article SQL
+
+            AI Worker
+                不在此 Service 中直接執行
+        """
+
+        articles = []
+
+        total = 0
+        new = 0
+        duplicate = 0
+        failed = 0
+
+        try:
+
+            if keyword is None:
+
+                logger.warning(
+                    "Article create skipped: "
+                    "keyword is None"
+                )
+
+                return {
+                    "articles": [],
+                    "total": 0,
+                    "new": 0,
+                    "duplicate": 0,
+                    "failed": 0,
+                }
+
+            keyword = str(
+                keyword
+            ).strip()
+
+            if not keyword:
+
+                logger.warning(
+                    "Article create skipped: "
+                    "keyword is empty"
+                )
+
+                return {
+                    "articles": [],
+                    "total": 0,
+                    "new": 0,
+                    "duplicate": 0,
+                    "failed": 0,
+                }
+
+            # ==================================
+            #
+            # P4
+            # Search Adapter
+            #
+            # ==================================
+
+            results = self._search(
+                keyword
+            )
+
+            if results is None:
+                results = []
+
+            try:
+
+                max_results = int(
+                    MAX_RESULTS
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                max_results = None
+
+            if (
+                max_results is not None
+                and max_results > 0
+            ):
+
+                results = results[
+                    :max_results
+                ]
+
+            total = len(
+                results
+            )
+
+            # ==================================
+            #
+            # Process Search Results
+            #
+            # ==================================
+
+            for item in results:
+
+                try:
+
+                    item_url = self._get_value(
+                        item,
+                        "url",
+                        "",
+                    )
+
+                    item_title = self._get_value(
+                        item,
+                        "title",
+                        "",
+                    )
+
+                    item_source = self._get_value(
+                        item,
+                        "source",
+                        "",
+                    )
+
+                    item_published = (
+                        self._get_value(
+                            item,
+                            "published",
+                            None,
+                        )
+                    )
+
+                    logger.info(
+                        f"Processing {item_title}"
+                    )
+
+                    # ==================================
+                    #
+                    # Validate URL
+                    #
+                    # ==================================
+
+                    if not item_url:
+
+                        failed += 1
+
+                        logger.warning(
+                            "Search result URL is empty"
+                        )
+
+                        continue
+
+                    # ==================================
+                    #
+                    # Download
+                    #
+                    # ==================================
+
+                    html = download(
+                        item_url,
+                        HEADERS,
+                    )
+
+                    if html is None:
+
+                        failed += 1
+
+                        logger.warning(
+                            "Download failed: "
+                            f"{item_url}"
+                        )
+
+                        continue
+
+                    logger.info(
+                        "Raw HTML downloaded: "
+                        f"url={item_url}, "
+                        f"size={len(html.encode('utf-8')) if isinstance(html, str) else len(html)}"
+                    )
+
+                    # ==================================
+                    #
+                    # Parse
+                    #
+                    # ==================================
+
+                    article = parse(
+                        html,
+                        keyword,
+                    )
+
+                    if article is None:
+
+                        failed += 1
+
+                        logger.warning(
+                            "Parse failed: "
+                            f"{item_url}"
+                        )
+
+                        continue
+
+                    # ==================================
+                    #
+                    # Article Metadata
+                    #
+                    # ==================================
+
+                    article.keyword = keyword
+                    article.title = item_title
+                    article.url = item_url
+                    article.source = item_source
+                    article.published = item_published
+                    article.status = "Success"
+
+                    # ==================================
+                    #
+                    # Article Document Hash
+                    #
+                    # ==================================
+
+                    article.document_id = (
+                        self._get_document_hash(
+                            article.title,
+                            article.content,
+                        )
+                    )
+
+                    # ==================================================
+                    #
+                    # STEP 1
+                    #
+                    # Article Document Duplicate Detection
+                    #
+                    # ==================================================
+
+                    existing_document = (
+                        self
+                        ._find_existing_article_by_document_id(
+                            article.document_id
+                        )
+                    )
+
+                    if existing_document is not None:
+
+                        existing_document_id = (
+                            self._get_article_id(
+                                existing_document
+                            )
+                        )
+
+                        duplicate += 1
+
+                        logger.info(
+                            "Duplicate article document: "
+                            f"document_id="
+                            f"{article.document_id}, "
+                            f"existing_article="
+                            f"{existing_document_id}, "
+                            f"url={item_url}"
+                        )
+
+                        continue
+
+                    # ==================================================
+                    #
+                    # STEP 2
+                    #
+                    # Existing Article By URL
+                    #
+                    # ==================================================
+
+                    existing_article = (
+                        self
+                        ._find_existing_article_by_url(
+                            item_url
+                        )
+                    )
+
+                    existing_article_id = (
+                        self._get_article_id(
+                            existing_article
+                        )
+                    )
+
+                    # ==================================================
+                    #
+                    # NEW ARTICLE
+                    #
+                    # ==================================================
+
+                    if existing_article_id is None:
+
+                        logger.info(
+                            "New article detected: "
+                            f"url={item_url}"
+                        )
+
+                        # ==========================================
+                        #
+                        # 1. SQL FIRST
+                        #
+                        # ==========================================
+
+                        saved = self.repo.insert(
+                            article
+                        )
+
+                        if saved is None:
+
+                            failed += 1
+
+                            logger.error(
+                                "Failed to save article to SQL: "
+                                f"url={item_url}"
+                            )
+
+                            continue
+
+                        saved_id = self._get_article_id(
+                            saved
+                        )
+
+                        if saved_id is None:
+
+                            failed += 1
+
+                            logger.error(
+                                "Article SQL insert succeeded "
+                                "but article ID is missing: "
+                                f"url={item_url}"
+                            )
+
+                            continue
+
+                        # ------------------------------------------
+                        #
+                        # Use persisted Article document_id
+                        #
+                        # 正式 Archive Identity
+                        #
+                        # ------------------------------------------
+
+                        saved_document_id = (
+                            self._get_value(
+                                saved,
+                                "document_id",
+                                None,
+                            )
+                        )
+
+                        if not saved_document_id:
+
+                            saved_document_id = (
+                                getattr(
+                                    article,
+                                    "document_id",
+                                    None,
+                                )
+                            )
+
+                        logger.info(
+                            "Article persisted to SQL: "
+                            f"article={saved_id}, "
+                            f"document_id="
+                            f"{saved_document_id}, "
+                            f"url={item_url}"
+                        )
+
+                        articles.append(
+                            saved
+                        )
+
+                        new += 1
+
+                        # ==========================================
+                        #
+                        # 2. ARCHIVE
+                        #
+                        # ==========================================
+                        #
+                        # IMPORTANT:
+                        #
+                        # raw HTML:
+                        #
+                        #     html
+                        #
+                        # document identity:
+                        #
+                        #     saved_document_id
+                        #
+                        # ArchiveService:
+                        #
+                        #     MongoDB raw_html
+                        #         +
+                        #     MySQL raw_documents
+                        #         +
+                        #     MySQL archive_versions
+                        #
+                        # ==========================================
+
+                        previous_version = (
+                            self
+                            ._get_latest_archive_version(
+                                saved_id
+                            )
+                        )
+
+                        archive_version = (
+                            self.archive_service.save_html(
+                                article_id=saved_id,
+                                document_id=saved_document_id,
+                                url=item_url,
+                                html=html,
+                            )
+                        )
+
+                        if archive_version is None:
+
+                            logger.error(
+                                "Archive failed after "
+                                "Article SQL persistence: "
+                                f"article={saved_id}, "
+                                f"url={item_url}"
+                            )
+
+                            # ======================================
+                            #
+                            # IMPORTANT
+                            #
+                            # Article remains in SQL.
+                            #
+                            # Archive failure does NOT remove
+                            # the Article.
+                            #
+                            # ======================================
+
+                        else:
+
+                            is_new_version = (
+                                self._is_new_archive_version(
+                                    previous_version,
+                                    archive_version,
+                                )
+                            )
+
+                            archive_version_number = (
+                                self._get_value(
+                                    archive_version,
+                                    "version_number",
+                                    None,
+                                )
+                            )
+
+                            archive_file_hash = (
+                                self._get_value(
+                                    archive_version,
+                                    "file_hash",
+                                    None,
+                                )
+                            )
+
+                            if is_new_version:
+
+                                logger.info(
+                                    "Archive completed: "
+                                    f"article={saved_id}, "
+                                    f"document_id="
+                                    f"{saved_document_id}, "
+                                    f"version="
+                                    f"{archive_version_number}, "
+                                    f"file_hash="
+                                    f"{archive_file_hash}, "
+                                    "storage=mongodb/raw_html"
+                                )
+
+                            else:
+
+                                logger.warning(
+                                    "Archive returned no new "
+                                    "version for new Article: "
+                                    f"article={saved_id}, "
+                                    f"version="
+                                    f"{archive_version_number}"
+                                )
+
+                        # ==========================================
+                        #
+                        # 3. AI TASK
+                        #
+                        # IMPORTANT:
+                        #
+                        # Article SQL already exists.
+                        #
+                        # AI Task creation must not depend on
+                        # Archive success.
+                        #
+                        # ==========================================
+
+                        task = self.create_ai_task(
+                            saved_id
+                        )
+
+                        if task is None:
+
+                            logger.warning(
+                                "AI Task creation failed: "
+                                f"article={saved_id}"
+                            )
+
+                        else:
+
+                            self._trigger_ai_batch()
+
+                        continue
+
+                    # ==================================================
+                    #
+                    # EXISTING URL
+                    #
+                    # document_id 不同
+                    #
+                    # = Changed Article Content
+                    #
+                    # ==================================================
+
+                    logger.info(
+                        "Existing URL with changed "
+                        "Article document detected: "
+                        f"article={existing_article_id}, "
+                        f"url={item_url}"
+                    )
+
+                    # ==========================================
+                    #
+                    # Existing Article Document ID
+                    #
+                    # ==========================================
+
+                    existing_document_id = (
+                        self._get_value(
+                            existing_article,
+                            "document_id",
+                            None,
+                        )
+                    )
+
+                    # ==========================================
+                    #
+                    # Previous Archive Version
+                    #
+                    # ==========================================
+
+                    previous_version = (
+                        self
+                        ._get_latest_archive_version(
+                            existing_article_id
+                        )
+                    )
+
+                    previous_version_number = (
+                        self._get_value(
+                            previous_version,
+                            "version_number",
+                            None,
+                        )
+                    )
+
+                    # ==========================================
+                    #
+                    # ArchiveService
+                    #
+                    # Archive Duplicate Authority
+                    #
+                    # IMPORTANT:
+                    #
+                    # MongoDB Raw HTML identity:
+                    #
+                    #     document_id
+                    #
+                    # Duplicate Detection:
+                    #
+                    #     URL + HTML Hash
+                    #
+                    # document_id 不參與
+                    # Archive Duplicate Detection。
+                    #
+                    # ==========================================
+
+                    archive_version = (
+                        self.archive_service.save_html(
+                            article_id=existing_article_id,
+                            document_id=article.document_id,
+                            url=item_url,
+                            html=html,
+                        )
+                    )
+
+                    if archive_version is None:
+
+                        failed += 1
+
+                        logger.error(
+                            "Archive failed for "
+                            f"existing article="
+                            f"{existing_article_id}"
+                        )
+
+                        continue
+
+                    archive_version_number = (
+                        self._get_value(
+                            archive_version,
+                            "version_number",
+                            None,
+                        )
+                    )
+
+                    archive_file_hash = (
+                        self._get_value(
+                            archive_version,
+                            "file_hash",
+                            None,
+                        )
+                    )
+
+                    is_new_version = (
+                        self._is_new_archive_version(
+                            previous_version,
+                            archive_version,
+                        )
+                    )
+
+                    # ==========================================
+                    #
+                    # Same URL + Same HTML
+                    #
+                    # ==========================================
+
+                    if not is_new_version:
+
+                        duplicate += 1
+
+                        logger.info(
+                            "Archive duplicate: "
+                            f"article="
+                            f"{existing_article_id}, "
+                            f"version="
+                            f"{archive_version_number}, "
+                            f"previous_version="
+                            f"{previous_version_number}, "
+                            f"url={item_url}"
+                        )
+
+                        continue
+
+                    # ==========================================
+                    #
+                    # New Archive Version
+                    #
+                    # Update current Article SQL Snapshot
+                    #
+                    # ==========================================
+
+                    snapshot_updated = (
+                        self._update_existing_article_snapshot(
+                            existing_article_id,
+                            article,
+                        )
+                    )
+
+                    if not snapshot_updated:
+
+                        failed += 1
+
+                        logger.error(
+                            "Article SQL snapshot update failed "
+                            "after new Archive Version: "
+                            f"article="
+                            f"{existing_article_id}, "
+                            f"url={item_url}"
+                        )
+
+                        continue
+
+                    logger.info(
+                        "New archive version created and "
+                        "Article SQL snapshot updated: "
+                        f"article="
+                        f"{existing_article_id}, "
+                        f"previous_version="
+                        f"{previous_version_number}, "
+                        f"new_version="
+                        f"{archive_version_number}, "
+                        f"file_hash="
+                        f"{archive_file_hash}, "
+                        f"document_id="
+                        f"{article.document_id}, "
+                        "storage=mongodb/raw_html"
+                    )
+
+                    # ==========================================
+                    #
+                    # AI Task
+                    #
+                    # New SQL Snapshot
+                    #     ↓
+                    # AI WAITING
+                    #
+                    # ==========================================
+
+                    task = self.create_ai_task(
+                        existing_article_id
+                    )
+
+                    if task is None:
+
+                        logger.warning(
+                            "AI Task creation failed: "
+                            f"article="
+                            f"{existing_article_id}"
+                        )
+
+                    else:
+
+                        self._trigger_ai_batch()
+
+                    articles.append(
+                        article
+                    )
+
+                    new += 1
+
+                except Exception as e:
+
+                    failed += 1
+
+                    logger.exception(
+                        "Article processing error: "
+                        f"{e}"
+                    )
+
+            return {
+                "articles": articles,
+                "total": total,
+                "new": new,
+                "duplicate": duplicate,
+                "failed": failed,
+            }
+
+        except Exception as e:
+
+            logger.exception(
+                "Article create error: "
+                f"{e}"
+            )
+
+            return {
+                "articles": [],
+                "total": total,
+                "new": new,
+                "duplicate": duplicate,
+                "failed": failed,
+            }
 
     # ==================================================
     #
@@ -1519,37 +2020,35 @@ class ArticleService:
 
         try:
 
+            if hasattr(
+                self.repo,
+                "get_top_ai_articles",
+            ):
+
+                return self.repo.get_top_ai_articles(
+                    limit
+                )
+
             articles = self.repo.find_all()
 
             def importance_value(
                 item,
             ):
 
-                if isinstance(
+                value = self._get_value(
                     item,
-                    dict,
-                ):
-
-                    value = item.get(
-                        "ai_importance",
-                        0,
-                    )
-
-                else:
-
-                    value = getattr(
-                        item,
-                        "ai_importance",
-                        0,
-                    )
+                    "ai_importance",
+                    0,
+                )
 
                 if value is None:
-
                     return 0
 
                 try:
 
-                    return float(value)
+                    return float(
+                        value
+                    )
 
                 except (
                     TypeError,
@@ -1593,8 +2092,6 @@ class ArticleService:
     ):
         """
         更新 Article Metadata。
-
-        P3.2 Article Management。
 
         不負責:
 
@@ -1798,6 +2295,12 @@ class ArticleService:
                 f"{e}"
             )
 
+
+# ======================================
+#
+# Public API
+#
+# ======================================
 
 __all__ = [
     "ArticleService",

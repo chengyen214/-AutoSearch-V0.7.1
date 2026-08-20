@@ -69,13 +69,3 @@ GROQ_API_KEY = os.getenv(
 )
 
 
-# ==================================================
-# Async AI Task Batch
-# ==================================================
-
-AI_TASK_BATCH_THRESHOLD = int(
-    os.getenv(
-        "AI_TASK_BATCH_THRESHOLD",
-        "40"
-    )
-)

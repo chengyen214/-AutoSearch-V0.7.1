@@ -7,19 +7,28 @@ Article Repository
 
 功能:
 
-- Article Database CRUD
+- Article CRUD
 - Article Query
 - AI Analysis Persistence
 - Async AI Pipeline Support
 - Article Management
 - Current Article Snapshot
 
+P2.4.1:
+
+- Article Storage 與 AI Analysis 解耦
+- Article 可以在沒有 AI Analysis 時先存入 Database
+- 未分析 AI fields 使用 NULL
+- ai_status 管理 Article AI Analysis 狀態
+
 Database:
 
 MySQL
 """
 
+
 from datetime import datetime
+
 import json
 
 
@@ -83,6 +92,10 @@ class ArticleRepository:
 
     # ==================================================
     # Create Article
+    #
+    # P2.4.1
+    #
+    # Article Storage 與 AI Analysis 解耦
     # ==================================================
 
     def save(
@@ -91,6 +104,37 @@ class ArticleRepository:
     ):
         """
         儲存 Article。
+
+        P2.4.1 核心行為:
+
+            Article 不存在
+                ↓
+            直接 INSERT
+                ↓
+            不要求 AI Analysis
+
+        尚未 AI Analysis:
+
+            ai_summary      = NULL
+            ai_category     = NULL
+            ai_keywords     = NULL
+            ai_importance   = NULL
+            ai_model        = NULL
+            ai_version      = NULL
+            ai_analyze_time = NULL
+            ai_confidence   = NULL
+
+            ai_status       = pending
+
+        已有 AI Analysis:
+
+            AI fields 正常保存
+            ai_status = completed
+
+        Duplicate:
+
+            document_id 已存在
+            → 不重複 INSERT
 
         回傳:
 
@@ -101,6 +145,10 @@ class ArticleRepository:
                 失敗 / Duplicate
         """
 
+        # ==================================================
+        # Validate Article
+        # ==================================================
+
         if article is None:
 
             logger.error(
@@ -109,6 +157,10 @@ class ArticleRepository:
             )
 
             return False
+
+        # ==================================================
+        # Document ID
+        # ==================================================
 
         document_id = getattr(
             article,
@@ -125,13 +177,20 @@ class ArticleRepository:
 
             return False
 
+        # ==================================================
+        # Duplicate Protection
+        #
+        # document_id 是 Article 唯一識別依據
+        # ==================================================
+
         if self.exists(
             document_id
         ):
 
             logger.info(
                 "Article exists: "
-                f"{getattr(article, 'title', '')}"
+                f"{getattr(article, 'title', '')}, "
+                f"document_id={document_id}"
             )
 
             return False
@@ -190,9 +249,9 @@ class ArticleRepository:
 
         try:
 
-            # ==========================================
+            # ==================================================
             # Published
-            # ==========================================
+            # ==================================================
 
             published = self._normalize_datetime(
                 getattr(
@@ -202,23 +261,50 @@ class ArticleRepository:
                 )
             )
 
-            # ==========================================
+            # ==================================================
+            # P2.4.1
+            #
             # Default AI Fields
-            # ==========================================
+            #
+            # 尚未分析:
+            #
+            #     NULL
+            #
+            # 不再使用:
+            #
+            #     ""
+            #     "[]"
+            #     0
+            #     0.0
+            #
+            # 因為這些值可能是合法 AI 結果。
+            # ==================================================
 
-            ai_summary = ""
-            ai_category = ""
-            ai_keywords = "[]"
-            ai_importance = 0
-            ai_model = ""
-            ai_version = ""
+            ai_summary = None
+
+            ai_category = None
+
+            ai_keywords = None
+
+            ai_importance = None
+
+            ai_model = None
+
+            ai_version = None
+
             ai_analyze_time = None
-            ai_confidence = 0.0
+
+            ai_confidence = None
+
             ai_status = "pending"
 
-            # ==========================================
+            # ==================================================
             # Existing AI Analysis
-            # ==========================================
+            #
+            # 如果 Article 在進入 Repository 前
+            # 已經存在 AI Analysis，
+            # 則直接保存 AI 結果。
+            # ==================================================
 
             analysis = getattr(
                 article,
@@ -228,46 +314,86 @@ class ArticleRepository:
 
             if analysis is not None:
 
+                # ==============================================
+                # AI Summary
+                # ==============================================
+
                 ai_summary = getattr(
                     analysis,
                     "summary",
-                    ""
+                    None
                 )
+
+                # ==============================================
+                # AI Category
+                # ==============================================
 
                 ai_category = getattr(
                     analysis,
                     "category",
-                    ""
+                    None
                 )
 
-                ai_keywords = json.dumps(
-                    getattr(
-                        analysis,
-                        "keywords",
-                        []
-                    ),
-                    ensure_ascii=False
+                # ==============================================
+                # AI Keywords
+                # ==============================================
+
+                keywords = getattr(
+                    analysis,
+                    "keywords",
+                    None
                 )
 
-                ai_importance = int(
-                    getattr(
-                        analysis,
-                        "importance",
-                        0
-                    ) or 0
+                if keywords is not None:
+
+                    ai_keywords = json.dumps(
+                        keywords,
+                        ensure_ascii=False
+                    )
+
+                else:
+
+                    ai_keywords = None
+
+                # ==============================================
+                # AI Importance
+                # ==============================================
+
+                ai_importance = getattr(
+                    analysis,
+                    "importance",
+                    None
                 )
+
+                if ai_importance is not None:
+
+                    ai_importance = int(
+                        ai_importance
+                    )
+
+                # ==============================================
+                # AI Model
+                # ==============================================
 
                 ai_model = getattr(
                     analysis,
                     "ai_model",
-                    ""
+                    None
                 )
+
+                # ==============================================
+                # AI Version
+                # ==============================================
 
                 ai_version = getattr(
                     analysis,
                     "ai_version",
-                    ""
+                    None
                 )
+
+                # ==============================================
+                # AI Analyze Time
+                # ==============================================
 
                 ai_analyze_time = getattr(
                     analysis,
@@ -275,21 +401,37 @@ class ArticleRepository:
                     None
                 )
 
-                ai_confidence = float(
-                    getattr(
-                        analysis,
-                        "confidence",
-                        0.0
-                    ) or 0.0
+                # ==============================================
+                # AI Confidence
+                # ==============================================
+
+                ai_confidence = getattr(
+                    analysis,
+                    "confidence",
+                    None
                 )
+
+                if ai_confidence is not None:
+
+                    ai_confidence = float(
+                        ai_confidence
+                    )
+
+                # ==============================================
+                # AI Status
+                # ==============================================
 
                 ai_status = "completed"
 
-            # ==========================================
+            # ==================================================
             # Values
-            # ==========================================
+            # ==================================================
 
             values = (
+
+                # ----------------------------------------------
+                # Article
+                # ----------------------------------------------
 
                 document_id,
 
@@ -337,6 +479,10 @@ class ArticleRepository:
                     "Success"
                 ),
 
+                # ----------------------------------------------
+                # AI
+                # ----------------------------------------------
+
                 ai_summary,
 
                 ai_category,
@@ -356,6 +502,10 @@ class ArticleRepository:
                 ai_status
             )
 
+            # ==================================================
+            # INSERT
+            # ==================================================
+
             cursor.execute(
                 sql,
                 values
@@ -363,11 +513,19 @@ class ArticleRepository:
 
             self.connection.commit()
 
-            article.id = cursor.lastrowid
+            # ==================================================
+            # Database ID
+            # ==================================================
+
+            article.id = (
+                cursor.lastrowid
+            )
 
             logger.info(
                 "Database saved: "
-                f"{getattr(article, 'title', '')}"
+                f"title={getattr(article, 'title', '')}, "
+                f"id={article.id}, "
+                f"ai_status={ai_status}"
             )
 
             return True
@@ -495,13 +653,13 @@ class ArticleRepository:
 
                 """
 
-            SELECT *
+                SELECT *
 
-            FROM articles
+                FROM articles
 
-            WHERE id=%s
+                WHERE id=%s
 
-            """,
+                """,
 
                 (
                     article_id,
@@ -588,9 +746,9 @@ class ArticleRepository:
             )
         )
 
-        # ==============================================
+        # ==================================================
         # Database Identity
-        # ==============================================
+        # ==================================================
 
         article.id = row.get(
             "id"
@@ -601,31 +759,31 @@ class ArticleRepository:
             ""
         )
 
-        # ==============================================
+        # ==================================================
         # AI Status
-        # ==============================================
+        # ==================================================
 
         article.ai_status = row.get(
             "ai_status",
             "pending"
         )
 
-        # ==============================================
+        # ==================================================
         # Restore AI Analysis
-        # ==============================================
+        # ==================================================
 
         ai_summary = row.get(
             "ai_summary",
-            ""
+            None
         )
 
-        if ai_summary:
+        if ai_summary is not None:
 
             try:
 
                 keywords = row.get(
                     "ai_keywords",
-                    "[]"
+                    None
                 )
 
                 if isinstance(
@@ -655,24 +813,24 @@ class ArticleRepository:
 
                     category=row.get(
                         "ai_category",
-                        ""
+                        None
                     ),
 
                     keywords=keywords,
 
                     importance=row.get(
                         "ai_importance",
-                        0
-                    ) or 0,
+                        None
+                    ),
 
                     ai_model=row.get(
                         "ai_model",
-                        ""
+                        None
                     ),
 
                     ai_version=row.get(
                         "ai_version",
-                        ""
+                        None
                     ),
 
                     analyze_time=row.get(
@@ -682,8 +840,8 @@ class ArticleRepository:
 
                     confidence=row.get(
                         "ai_confidence",
-                        0.0
-                    ) or 0.0
+                        None
+                    )
                 )
 
                 article.ai_analysis = (
@@ -1074,6 +1232,11 @@ class ArticleRepository:
     ):
         """
         取得尚未完成 AI Analysis 的 Article。
+
+        P2.4.1:
+
+            NULL / pending
+            都視為尚未完成 AI。
         """
 
         cursor = self.connection.cursor(
@@ -1133,9 +1296,6 @@ class ArticleRepository:
 
             不先呼叫 find_by_id()，
             避免產生額外 SQL。
-
-            這對 Unit Test Mock
-            以及實際 DB Pipeline 都比較乾淨。
         """
 
         cursor = self.connection.cursor()
@@ -1257,6 +1417,11 @@ class ArticleRepository:
         儲存 AI Analysis Result。
 
         AI Worker 完成分析後呼叫。
+
+        P2.4.1:
+
+            AI Analysis 完成後，
+            將 NULL AI fields 更新成實際結果。
         """
 
         if article is None:
@@ -1324,53 +1489,91 @@ class ArticleRepository:
 
         try:
 
+            # ==================================================
+            # Keywords
+            # ==================================================
+
             keywords = getattr(
                 analysis,
                 "keywords",
-                []
+                None
             )
 
-            if keywords is None:
+            if keywords is not None:
 
-                keywords = []
+                ai_keywords = json.dumps(
+                    keywords,
+                    ensure_ascii=False
+                )
+
+            else:
+
+                ai_keywords = None
+
+            # ==================================================
+            # Importance
+            # ==================================================
+
+            importance = getattr(
+                analysis,
+                "importance",
+                None
+            )
+
+            if importance is not None:
+
+                importance = int(
+                    importance
+                )
+
+            # ==================================================
+            # Confidence
+            # ==================================================
+
+            confidence = getattr(
+                analysis,
+                "confidence",
+                None
+            )
+
+            if confidence is not None:
+
+                confidence = float(
+                    confidence
+                )
+
+            # ==================================================
+            # Values
+            # ==================================================
 
             values = (
 
                 getattr(
                     analysis,
                     "summary",
-                    ""
+                    None
                 ),
 
                 getattr(
                     analysis,
                     "category",
-                    ""
+                    None
                 ),
 
-                json.dumps(
-                    keywords,
-                    ensure_ascii=False
-                ),
+                ai_keywords,
 
-                int(
-                    getattr(
-                        analysis,
-                        "importance",
-                        0
-                    ) or 0
-                ),
+                importance,
 
                 getattr(
                     analysis,
                     "ai_model",
-                    ""
+                    None
                 ),
 
                 getattr(
                     analysis,
                     "ai_version",
-                    ""
+                    None
                 ),
 
                 getattr(
@@ -1379,13 +1582,7 @@ class ArticleRepository:
                     None
                 ),
 
-                float(
-                    getattr(
-                        analysis,
-                        "confidence",
-                        0.0
-                    ) or 0.0
-                ),
+                confidence,
 
                 "completed",
 
@@ -1894,9 +2091,9 @@ class ArticleRepository:
 
         try:
 
-            # ==========================================
+            # ==================================================
             # Archive Versions
-            # ==========================================
+            # ==================================================
 
             cursor.execute(
 
@@ -1920,9 +2117,9 @@ class ArticleRepository:
                 cursor.fetchone()["count"]
             )
 
-            # ==========================================
+            # ==================================================
             # Raw Documents
-            # ==========================================
+            # ==================================================
 
             cursor.execute(
 
@@ -1946,9 +2143,9 @@ class ArticleRepository:
                 cursor.fetchone()["count"]
             )
 
-            # ==========================================
+            # ==================================================
             # AI Tasks
-            # ==========================================
+            # ==================================================
 
             cursor.execute(
 
@@ -1972,9 +2169,9 @@ class ArticleRepository:
                 cursor.fetchone()["count"]
             )
 
-            # ==========================================
+            # ==================================================
             # Knowledge Archive
-            # ==========================================
+            # ==================================================
 
             cursor.execute(
 
@@ -1998,9 +2195,9 @@ class ArticleRepository:
                 cursor.fetchone()["count"]
             )
 
-            # ==========================================
+            # ==================================================
             # Archive Protection
-            # ==========================================
+            # ==================================================
 
             if (
                 archive_count > 0
@@ -2023,9 +2220,9 @@ class ArticleRepository:
 
                 return False
 
-            # ==========================================
+            # ==================================================
             # Delete Article
-            # ==========================================
+            # ==================================================
 
             cursor.execute(
 

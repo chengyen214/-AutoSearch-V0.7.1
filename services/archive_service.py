@@ -7,44 +7,113 @@ P2.2.2 Step 4
 
 Archive Service
 
-功能:
+功能：
 
-1. 保存 Raw HTML Snapshot
-2. 建立 Archive Path
-3. 計算實際檔案 File Hash
-4. 儲存 Raw Document Metadata
+1. 保存 Raw HTML Snapshot 到 MongoDB
+2. 建立 Raw HTML MongoDB Document
+3. 計算 HTML Content Hash
+4. 儲存 Raw Document Metadata 到 MySQL
 5. 建立 Archive Version
 6. 自動計算 Version Number
 7. 偵測相同 URL + 相同 HTML
 8. 相同內容不建立新的 Version
 
+Storage Architecture:
+
+    Crawler
+        ↓
+    ArchiveService
+        │
+        ├── RawHTMLRepository
+        │       ↓
+        │   MongoDB
+        │       ↓
+        │   autosearch.raw_html
+        │
+        ├── RawDocumentRepository
+        │       ↓
+        │   MySQL raw_documents
+        │
+        └── ArchiveVersionRepository
+                ↓
+            MySQL archive_versions
+
+
+Duplicate Detection Policy:
+
+    URL
+    +
+    HTML Content Hash
+        ↓
+    相同
+        ↓
+    Duplicate Archive
+
+重要：
+
+    article_id
+    不參與 Duplicate Detection。
+
+article_id 只負責：
+
+    1. Archive Version 歸屬
+    2. Version Number
+    3. Article Version History
+
+
+Hash Responsibility:
+
+Article document_id
+    ↓
+utils.hash.generate_hash()
+
+Archive content hash
+    ↓
+utils.hash.generate_content_hash()
+
+ArchiveService 不自行實作 SHA256。
+
+
 Flow:
 
 Crawler
-↓
+    ↓
 ArchiveService
-├── RawDocumentRepository
-│       ↓
-│   raw_documents
-│
-└── ArchiveVersionRepository
-        ↓
-    archive_versions
+    │
+    ├── RawHTMLRepository
+    │       ↓
+    │   MongoDB raw_html
+    │
+    ├── RawDocumentRepository
+    │       ↓
+    │   MySQL raw_documents
+    │
+    └── ArchiveVersionRepository
+            ↓
+        MySQL archive_versions
+
+
+Duplicate Detection:
+
+    original_url + file_hash
+
+不考慮：
+
+    article_id
+
 
 Version History:
 
 Article
-↓
+    ↓
 Version 1
 Version 2
 Version 3
 ...
 """
 
-import os
-import hashlib
-
 from datetime import datetime
+
 
 from database.raw_document_repository import (
     RawDocumentRepository
@@ -54,12 +123,21 @@ from database.archive_version_repository import (
     ArchiveVersionRepository
 )
 
+from database.raw_html_repository import (
+    RawHTMLRepository
+)
+
 from models.raw_document import (
     RawDocument
 )
 
 from models.archive_version import (
     ArchiveVersion
+)
+
+from utils.hash import (
+    generate_content_hash,
+    generate_hash,
 )
 
 from utils.logger import logger
@@ -71,27 +149,32 @@ class ArchiveService:
     # Initialize
     # ======================================
 
-    def __init__(self):
+    def __init__(
+        self
+    ):
 
-        # ==================================
-        # Repository
-        # ==================================
+        # ----------------------------------
+        # MySQL Raw Document
+        # ----------------------------------
 
         self.raw_repo = (
             RawDocumentRepository()
         )
 
+        # ----------------------------------
+        # MySQL Archive Version
+        # ----------------------------------
+
         self.version_repo = (
             ArchiveVersionRepository()
         )
 
-        # ==================================
-        # Archive Root
-        # ==================================
+        # ----------------------------------
+        # MongoDB Raw HTML
+        # ----------------------------------
 
-        self.archive_root = os.path.join(
-            "archive",
-            "html"
+        self.raw_html_repo = (
+            RawHTMLRepository()
         )
 
     # ======================================
@@ -104,29 +187,73 @@ class ArchiveService:
         self,
         article_id,
         url,
-        html
+        html,
+        document_id=None
     ):
         """
         儲存 HTML Archive。
 
-        Change Detection:
+        Raw HTML：
 
-            相同 Article
+            MongoDB
+
+        Metadata：
+
+            MySQL raw_documents
+
+        Version：
+
+            MySQL archive_versions
+
+
+        Parameters
+        ----------
+
+        article_id :
+            MySQL Article ID
+
+        url :
+            原始 URL
+
+        html :
+            原始 HTML
+
+        document_id :
+            Article Document ID
+
+            如果呼叫端沒有提供，
+            會使用 Article ID 建立
+            相容性 Document ID。
+
+
+        Duplicate Detection：
+
+            URL
             +
-            相同 URL
-            +
-            相同 HTML
+            HTML Hash
 
-        → 不建立新的 Version。
+        相同：
 
-        不同 HTML:
+            → 不建立新的 Version
 
-            Version 1
-            Version 2
-            Version 3
-            ...
+        不同：
 
+            → 建立新的 Version
+
+
+        注意：
+
+            article_id 絕對不參與
+            Duplicate Detection。
+
+        article_id 僅用於：
+
+            Version 歸屬
+            Version Number
+            Article Version History
         """
+
+        mongo_document_id = None
 
         try:
 
@@ -154,11 +281,23 @@ class ArchiveService:
 
                 return None
 
+            url = str(
+                url
+            ).strip()
+
+            if not url:
+
+                logger.warning(
+                    "Archive URL is empty after normalization"
+                )
+
+                return None
+
             # ==================================
             # Validate HTML
             # ==================================
 
-            if not html:
+            if html is None:
 
                 logger.warning(
                     "Archive HTML is empty"
@@ -167,49 +306,148 @@ class ArchiveService:
                 return None
 
             # ==================================
-            # Normalize URL
-            #
-            # 目前採 exact URL 比對。
-            #
-            # 只移除前後空白，
-            # 不改變 URL 本身。
+            # Normalize HTML
             # ==================================
 
-            url = str(
-                url
-            ).strip()
+            if isinstance(
+                html,
+                bytes
+            ):
+
+                try:
+
+                    html = html.decode(
+                        "utf-8"
+                    )
+
+                except UnicodeDecodeError as e:
+
+                    logger.error(
+                        "Archive HTML UTF-8 decode failed: "
+                        f"{e}"
+                    )
+
+                    return None
+
+            elif not isinstance(
+                html,
+                str
+            ):
+
+                html = str(
+                    html
+                )
+
+            if not html:
+
+                logger.warning(
+                    "Archive HTML is empty after normalization"
+                )
+
+                return None
 
             # ==================================
-            # Calculate Content Hash
+            # Resolve Document ID
+            # ==================================
             #
-            # HTML UTF-8 bytes 的 SHA256。
+            # 正式 Pipeline：
             #
-            # 用來判斷內容是否變化。
+            #     Article.document_id
+            #
+            # → 直接傳入。
+            #
+            # Compatibility：
+            #
+            #     舊版 save_html()
+            #     沒有 document_id
+            #
+            # → 建立穩定 Document ID。
+            #
+            # 注意：
+            #
+            # document_id 只負責 MongoDB
+            # Raw HTML Document Identity。
+            #
+            # 不參與：
+            #
+            #     URL + HTML Hash
+            #     Duplicate Detection
+            # ==================================
+
+            if document_id:
+
+                document_id = str(
+                    document_id
+                ).strip()
+
+            if not document_id:
+
+                document_id = (
+                    "archive-"
+                    +
+                    generate_hash(
+                        f"{article_id}:{url}"
+                    )
+                )
+
+                logger.warning(
+
+                    "Archive document_id was not "
+                    "provided. Generated compatibility "
+                    "document_id: "
+                    f"{document_id}"
+
+                )
+
+            # ==================================
+            # Generate Content Hash
             # ==================================
 
             content_hash = (
-                self.generate_hash(
+                generate_content_hash(
                     html
                 )
             )
 
+            if not content_hash:
+
+                logger.error(
+                    "Failed to generate archive content hash"
+                )
+
+                return None
+
             # ==================================
-            # Change Detection
+            # Duplicate Detection
             #
-            # 相同：
+            # 唯一條件：
             #
-            # article_id
-            # +
-            # URL
-            # +
-            # file_hash
+            #     URL
+            #     +
+            #     HTML Content Hash
             #
-            # → 不建立新的 Version
+            # NEVER：
+            #
+            #     article_id
+            #
+            # 這裡是本次 Archive Request
+            # 的唯一正常流程 Duplicate Check。
+            #
+            # 如果沒有找到：
+            #
+            #     → 繼續建立 Archive Version
+            #
+            # 如果找到：
+            #
+            #     → 直接回傳既有 Version
+            #
+            # 不在 RawDocument 儲存後再次
+            # 執行相同 Check，避免把本次
+            # 新增的 Archive 誤判為 Duplicate。
             # ==================================
 
             existing_version = (
                 self._find_existing_version(
-                    article_id=article_id,
                     url=url,
                     file_hash=content_hash
                 )
@@ -219,15 +457,16 @@ class ArchiveService:
 
                 logger.info(
 
-                    "Archive content unchanged: "
-
-                    f"article={article_id}, "
+                    "Archive duplicate detected: "
 
                     f"url={url}, "
 
                     f"hash={content_hash}, "
 
-                    f"version="
+                    f"existing_article="
+                    f"{existing_version.article_id}, "
+
+                    f"existing_version="
                     f"{existing_version.version_number}"
 
                 )
@@ -241,222 +480,115 @@ class ArchiveService:
             now = datetime.now()
 
             # ==================================
-            # Archive Folder
-            # ==================================
-
-            folder = os.path.join(
-
-                self.archive_root,
-
-                str(now.year),
-
-                f"{now.month:02d}",
-
-                f"{now.day:02d}"
-
-            )
-
-            os.makedirs(
-
-                folder,
-
-                exist_ok=True
-
-            )
-
-            # ==================================
-            # Temporary File
+            # Save Raw HTML to MongoDB
             #
-            # 先寫入實際 HTML。
-            # ==================================
-
-            temp_filename = (
-                "temp_archive.html"
-            )
-
-            temp_path = os.path.join(
-
-                folder,
-
-                temp_filename
-
-            )
-
-            with open(
-
-                temp_path,
-
-                "w",
-
-                encoding="utf-8",
-
-                newline=""
-
-            ) as f:
-
-                f.write(html)
-
-            # ==================================
-            # Calculate Hash From Actual File
+            # HTML 本體正式儲存在：
             #
-            # 最終 Archive File 使用
-            # 實際落盤 bytes 的 SHA256。
+            #     MongoDB
+            #
+            # 不再使用：
+            #
+            #     archive/html
             # ==================================
 
-            file_hash = (
-                self.generate_file_hash(
-                    temp_path
+            try:
+
+                mongo_document_id = (
+                    self.raw_html_repo.save(
+                        article_id=article_id,
+                        document_id=document_id,
+                        url=url,
+                        html=html, 
+                        content_hash=content_hash
+                    )
                 )
+
+            except Exception as e:
+
+                logger.exception(
+
+                    "Failed to save Raw HTML "
+                    "to MongoDB: "
+                    f"{e}"
+
+                )
+
+                return None
+
+            if mongo_document_id is None:
+
+                logger.error(
+                    "Failed to save Raw HTML to MongoDB"
+                )
+
+                return None
+
+            logger.info(
+
+                "Raw HTML MongoDB archive saved: "
+
+                f"article={article_id}, "
+
+                f"document_id={document_id}, "
+
+                f"mongo_id={mongo_document_id}, "
+
+                f"hash={content_hash}"
+
             )
 
             # ==================================
-            # File Name
+            # MongoDB Storage Reference
+            #
+            # MySQL 不保存 HTML 本體。
+            #
+            # storage_path：
+            #
+            #     mongodb://raw_html/<mongo_id>
+            #
+            # 這是 Storage Reference，
+            # 不是本地檔案路徑。
             # ==================================
 
-            filename = (
-                f"{file_hash}.html"
+            storage_path = (
+                f"mongodb://raw_html/"
+                f"{mongo_document_id}"
             )
-
-            storage_path = os.path.join(
-
-                folder,
-
-                filename
-
-            )
-
-            # ==================================
-            # Avoid Duplicate File Conflict
-            # ==================================
-
-            if os.path.exists(
-                storage_path
-            ):
-
-                os.remove(
-                    temp_path
-                )
-
-            else:
-
-                os.replace(
-
-                    temp_path,
-
-                    storage_path
-
-                )
 
             # ==================================
             # File Size
-            # ==================================
-
-            file_size = os.path.getsize(
-                storage_path
-            )
-
-            # ==================================
-            # Normalize DB Path
             #
-            # Database 統一使用 /
+            # HTML 本體現在存在 MongoDB，
+            # 沒有本地 archive/html 檔案。
+            #
+            # 因此使用 UTF-8 Byte Size。
             # ==================================
 
-            db_storage_path = os.path.join(
-
-                self.archive_root,
-
-                str(now.year),
-
-                f"{now.month:02d}",
-
-                f"{now.day:02d}",
-
-                filename
-
-            ).replace(
-                os.sep,
-                "/"
-            )
-
-            # ==================================
-            # Verify Actual File Hash
-            # ==================================
-
-            actual_hash = (
-                self.generate_file_hash(
-                    storage_path
+            file_size = len(
+                html.encode(
+                    "utf-8"
                 )
             )
-
-            if actual_hash != file_hash:
-
-                logger.error(
-
-                    "Archive hash verification failed: "
-
-                    f"expected={file_hash}, "
-
-                    f"actual={actual_hash}"
-
-                )
-
-                # 避免留下錯誤 Archive File
-
-                try:
-
-                    if os.path.exists(
-                        storage_path
-                    ):
-
-                        os.remove(
-                            storage_path
-                        )
-
-                except Exception:
-
-                    pass
-
-                return None
-
-            # ==================================
-            # Important:
-            #
-            # file_hash 應與 content_hash 相同。
-            #
-            # 如果不同，代表實際落盤內容
-            # 與原始 HTML 不一致。
-            # ==================================
-
-            if file_hash != content_hash:
-
-                logger.error(
-
-                    "Archive content hash mismatch: "
-
-                    f"content_hash={content_hash}, "
-
-                    f"file_hash={file_hash}"
-
-                )
-
-                try:
-
-                    if os.path.exists(
-                        storage_path
-                    ):
-
-                        os.remove(
-                            storage_path
-                        )
-
-                except Exception:
-
-                    pass
-
-                return None
 
             # ==================================
             # Raw Document
+            #
+            # MySQL：
+            #
+            #     raw_documents
+            #
+            # 儲存：
+            #
+            #     Article ID
+            #     URL
+            #     MongoDB Reference
+            #     Content Hash
+            #     Size
+            #     MIME Type
+            #
+            # HTML 本體：
+            #
+            #     MongoDB
             # ==================================
 
             raw_document = RawDocument(
@@ -465,9 +597,9 @@ class ArchiveService:
 
                 original_url=url,
 
-                storage_path=db_storage_path,
+                storage_path=storage_path,
 
-                file_hash=file_hash,
+                file_hash=content_hash,
 
                 file_size=file_size,
 
@@ -480,8 +612,6 @@ class ArchiveService:
             # ==================================
             # Save Raw Document
             # ==================================
-
-            saved_raw = None
 
             try:
 
@@ -496,43 +626,56 @@ class ArchiveService:
                 logger.exception(
 
                     "Failed to save RawDocument: "
-
                     f"{e}"
 
                 )
 
                 # ----------------------------------
-                # 如果 Database 已存在相同 Hash，
-                # 嘗試取得既有 RawDocument。
+                # Recovery Lookup
+                #
+                # ONLY：
+                #
+                #     URL + Hash
+                #
+                # 不使用 article_id。
                 # ----------------------------------
+
+                saved_raw = None
 
                 try:
 
-                    existing_raw = (
+                    saved_raw = (
                         self.raw_repo
-                        .get_by_file_hash(
-                            file_hash
+                        .get_by_url_and_file_hash(
+                            url=url,
+                            file_hash=content_hash
                         )
                     )
 
-                except Exception:
+                except Exception as lookup_error:
 
-                    existing_raw = None
+                    logger.exception(
 
-                if existing_raw is None:
+                        "Failed to lookup existing "
+                        "RawDocument: "
+                        f"{lookup_error}"
+
+                    )
+
+                if saved_raw is None:
 
                     return None
-
-                saved_raw = existing_raw
 
                 logger.info(
 
                     "Reuse existing RawDocument: "
 
-                    f"hash={file_hash}, "
+                    f"url={url}, "
+
+                    f"hash={content_hash}, "
 
                     f"raw_document="
-                    f"{existing_raw.id}"
+                    f"{saved_raw.id}"
 
                 )
 
@@ -545,58 +688,66 @@ class ArchiveService:
                 return None
 
             # ==================================
-            # Important:
+            # IMPORTANT
             #
-            # RawDocument 可能因為相同 Hash
-            # 被 Repository 重用。
+            # 不在這裡再次執行：
             #
-            # 此時再次確認：
+            #     _find_existing_version()
             #
-            # Article + URL + Hash
+            # 原因：
             #
-            # 是否已經存在 Version。
+            # 本次第一次 Check 已經確認
+            # URL + Hash 不存在。
+            #
+            # 如果這裡再次 Check，
+            # Fake Repository / 實際 Repository
+            # 都可能已經看到剛剛建立的資料，
+            # 導致本次 Version 被誤判成 Duplicate。
+            #
+            # 正常流程：
+            #
+            #     Duplicate Check
+            #         ↓
+            #     MongoDB Raw HTML
+            #         ↓
+            #     MySQL RawDocument
+            #         ↓
+            #     Version Number
+            #         ↓
+            #     Archive Version
+            #
+            # 只在下一次 save_html()
+            # 時進行 Duplicate Detection。
             # ==================================
-
-            existing_version = (
-                self._find_existing_version(
-                    article_id=article_id,
-                    url=url,
-                    file_hash=file_hash
-                )
-            )
-
-            if existing_version is not None:
-
-                logger.info(
-
-                    "Archive version already exists "
-                    "after RawDocument lookup: "
-
-                    f"article={article_id}, "
-
-                    f"url={url}, "
-
-                    f"hash={file_hash}, "
-
-                    f"version="
-                    f"{existing_version.version_number}"
-
-                )
-
-                return existing_version
 
             # ==================================
             # Get Next Version Number
+            #
+            # article_id 從這裡開始使用。
+            #
+            # 用途：
+            #
+            #     Article Version History
             # ==================================
 
             version_number = (
-
                 self.version_repo
                 .get_next_version_number(
                     article_id
                 )
-
             )
+
+            if version_number is None:
+
+                logger.error(
+
+                    "Failed to get next archive "
+                    "version number: "
+                    f"article={article_id}"
+
+                )
+
+                return None
 
             # ==================================
             # Create Archive Version
@@ -610,9 +761,9 @@ class ArchiveService:
 
                 version_number=version_number,
 
-                file_hash=file_hash,
+                file_hash=content_hash,
 
-                storage_path=db_storage_path,
+                storage_path=storage_path,
 
                 file_size=file_size,
 
@@ -626,13 +777,24 @@ class ArchiveService:
             # Save Archive Version
             # ==================================
 
-            saved_version = (
+            try:
 
-                self.version_repo.save(
-                    archive_version
+                saved_version = (
+                    self.version_repo.save(
+                        archive_version
+                    )
                 )
 
-            )
+            except Exception as e:
+
+                logger.exception(
+
+                    "Failed to save ArchiveVersion: "
+                    f"{e}"
+
+                )
+
+                return None
 
             if saved_version is None:
 
@@ -654,9 +816,13 @@ class ArchiveService:
 
                 f"version={version_number}, "
 
-                f"hash={file_hash}, "
+                f"url={url}, "
 
-                f"path={db_storage_path}"
+                f"hash={content_hash}, "
+
+                f"storage=mongodb, "
+
+                f"mongo_id={mongo_document_id}"
 
             )
 
@@ -675,9 +841,7 @@ class ArchiveService:
         except Exception as e:
 
             logger.exception(
-
                 f"Archive save error: {e}"
-
             )
 
             return None
@@ -690,45 +854,74 @@ class ArchiveService:
 
     def _find_existing_version(
         self,
-        article_id,
         url,
         file_hash
     ):
         """
-        查詢是否已存在：
+        全域 Duplicate Detection。
 
-            Article
-            +
-            URL
-            +
-            File Hash
+        唯一判斷條件：
 
-        相同代表：
-
-            相同文章
+            original_url
             +
-            相同網址
-            +
-            相同內容
+            file_hash
 
-        因此不需要建立新的 Version。
+        不使用：
+
+            article_id
+
+
+        Repository 優先使用：
+
+            ArchiveVersionRepository
+                ↓
+            get_by_url_and_file_hash()
+
+
+        如果尚未提供，
+        則 fallback：
+
+            RawDocumentRepository
+                ↓
+            get_by_url_and_file_hash()
+                ↓
+            ArchiveVersionRepository
+                ↓
+            get_by_raw_document_id()
         """
 
         try:
 
+            if not url:
+
+                return None
+
+            if not file_hash:
+
+                return None
+
+            url = str(
+                url
+            ).strip()
+
+            if not url:
+
+                return None
+
             # ==================================
-            # Preferred Repository API
+            # Global URL + Hash Detection
+            #
+            # 不傳 article_id。
             # ==================================
 
             if hasattr(
                 self.version_repo,
-                "get_by_article_url_hash"
+                "get_by_url_and_file_hash"
             ):
 
                 return (
                     self.version_repo
-                    .get_by_article_url_hash(
-                        article_id=article_id,
+                    .get_by_url_and_file_hash(
                         url=url,
                         file_hash=file_hash
                     )
@@ -737,93 +930,81 @@ class ArchiveService:
             # ==================================
             # Compatibility Fallback
             #
-            # 如果 Repository 尚未提供
-            # get_by_article_url_hash，
-            # 使用 Version History + RawDocument
-            # 做 fallback。
+            # ArchiveVersionRepository 如果尚未
+            # 提供 Global API，
+            # 使用 RawDocument Repository。
             # ==================================
 
-            versions = (
-                self.version_repo
-                .get_by_article_id(
-                    article_id
-                )
-            )
+            if not hasattr(
+                self.raw_repo,
+                "get_by_url_and_file_hash"
+            ):
 
-            if not versions:
+                logger.error(
+
+                    "RawDocumentRepository does not "
+                    "provide get_by_url_and_file_hash()."
+
+                )
 
                 return None
 
-            for version in versions:
+            raw_document = (
+                self.raw_repo
+                .get_by_url_and_file_hash(
+                    url=url,
+                    file_hash=file_hash
+                )
+            )
 
-                version_hash = getattr(
-                    version,
-                    "file_hash",
-                    None
+            if raw_document is None:
+
+                return None
+
+            raw_document_id = getattr(
+                raw_document,
+                "id",
+                None
+            )
+
+            if raw_document_id is None:
+
+                return None
+
+            # ==================================
+            # Find Version By RawDocument
+            # ==================================
+
+            if hasattr(
+                self.version_repo,
+                "get_by_raw_document_id"
+            ):
+
+                return (
+                    self.version_repo
+                    .get_by_raw_document_id(
+                        raw_document_id
+                    )
                 )
 
-                if version_hash != file_hash:
+            if hasattr(
+                self.version_repo,
+                "find_by_raw_document_id"
+            ):
 
-                    continue
-
-                # ----------------------------------
-                # 確認 RawDocument URL
-                # ----------------------------------
-
-                raw_document = None
-
-                raw_document_id = getattr(
-                    version,
-                    "raw_document_id",
-                    None
+                return (
+                    self.version_repo
+                    .find_by_raw_document_id(
+                        raw_document_id
+                    )
                 )
 
-                if raw_document_id is not None:
+            logger.error(
 
-                    if hasattr(
-                        self.raw_repo,
-                        "get_by_id"
-                    ):
+                "ArchiveVersionRepository does not "
+                "provide raw document lookup API."
 
-                        raw_document = (
-                            self.raw_repo
-                            .get_by_id(
-                                raw_document_id
-                            )
-                        )
-
-                # ----------------------------------
-                # 如果 Repository 沒有 get_by_id，
-                # 使用 file_hash 查詢。
-                # ----------------------------------
-
-                if raw_document is None:
-
-                    if hasattr(
-                        self.raw_repo,
-                        "get_by_file_hash"
-                    ):
-
-                        raw_document = (
-                            self.raw_repo
-                            .get_by_file_hash(
-                                file_hash
-                            )
-                        )
-
-                if raw_document is None:
-
-                    continue
-
-                raw_url = getattr(
-                    raw_document,
-                    "original_url",
-                    None
-                )
-
-                if raw_url == url:
-
-                    return version
+            )
 
             return None
 
@@ -833,7 +1014,6 @@ class ArchiveService:
 
                 "Find existing archive version "
                 "error: "
-
                 f"{e}"
 
             )
@@ -850,16 +1030,22 @@ class ArchiveService:
         self,
         article_id
     ):
+        """
+        取得 Article 所有 Archive Versions。
+
+        這裡使用 article_id 是正確的。
+
+        因為這是 Version History，
+        不是 Duplicate Detection。
+        """
 
         try:
 
             return (
-
                 self.version_repo
                 .get_by_article_id(
                     article_id
                 )
-
             )
 
         except Exception as e:
@@ -883,16 +1069,20 @@ class ArchiveService:
         self,
         article_id
     ):
+        """
+        取得 Article 最新 Archive Version。
+
+        article_id 在這裡是必要的，
+        因為這是 Article Version History。
+        """
 
         try:
 
             return (
-
                 self.version_repo
                 .get_latest_version(
                     article_id
                 )
-
             )
 
         except Exception as e:
@@ -906,68 +1096,13 @@ class ArchiveService:
 
             return None
 
-    # ======================================
-    #
-    # Generate Hash From File
-    #
-    # ======================================
 
-    def generate_file_hash(
-        self,
-        file_path
-    ):
+# ======================================
+#
+# Public API
+#
+# ======================================
 
-        sha256 = hashlib.sha256()
-
-        with open(
-            file_path,
-            "rb"
-        ) as f:
-
-            for chunk in iter(
-                lambda: f.read(
-                    1024 * 1024
-                ),
-                b""
-            ):
-
-                sha256.update(
-                    chunk
-                )
-
-        return sha256.hexdigest()
-
-    # ======================================
-    #
-    # Generate Hash From Content
-    #
-    # ======================================
-
-    def generate_hash(
-        self,
-        content
-    ):
-        """
-        計算 HTML UTF-8 Content SHA256。
-        """
-
-        if content is None:
-
-            return None
-
-        if not isinstance(
-            content,
-            str
-        ):
-
-            content = str(
-                content
-            )
-
-        return hashlib.sha256(
-
-            content.encode(
-                "utf-8"
-            )
-
-        ).hexdigest()
+__all__ = [
+    "ArchiveService",
+]
