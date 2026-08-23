@@ -730,6 +730,60 @@ class AITaskRepository:
         return self._row_to_model(
             row
         )
+    
+    def find_by_article_id(
+        self,
+        article_id
+    ):
+        """
+        依 Article ID 查詢 AI Task。
+
+        用於：
+
+            AI Pending Runner
+            Queue Recovery
+            Task Duplicate Detection
+
+        同一篇 Article 只尋找最近的一筆 Task。
+        """
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            sql = """
+            SELECT *
+            FROM ai_tasks
+            WHERE article_id=%s
+            ORDER BY id DESC
+            LIMIT 1
+            """
+
+            cursor.execute(
+                sql,
+                (
+                    article_id,
+                )
+            )
+
+            row = cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+            conn.close()
+
+        if row is None:
+
+            return None
+
+        return self._row_to_model(
+            row
+        )
 
     # ==================================================
     # Update Status

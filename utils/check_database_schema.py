@@ -1,5 +1,7 @@
 """
-AutoSearch V4
+utils/check_database_schema.py
+
+AutoSearch V5
 
 Database Schema Inspector
 
@@ -12,11 +14,28 @@ Database Schema Inspector
 - Create SQL
 - Index / Structure
 
+支援:
+
+V4
+    - Articles
+    - AI Tasks
+    - Knowledge Archive
+    - Knowledge Scores
+    - Search Index
+    - Raw Documents
+
+V5
+    - Targets
+    - Jobs
 """
+
 
 from database.connection import get_connection
 
 
+# ======================================
+# Show Tables
+# ======================================
 
 def show_tables():
 
@@ -24,31 +43,33 @@ def show_tables():
 
     cursor = conn.cursor()
 
+    try:
 
-    cursor.execute(
-        "SHOW TABLES"
-    )
-
-
-    tables = cursor.fetchall()
-
-
-    print(
-        "\n========== TABLES ==========\n"
-    )
-
-
-    for table in tables:
-
-        print(
-            table[0]
+        cursor.execute(
+            "SHOW TABLES"
         )
 
+        tables = cursor.fetchall()
 
-    cursor.close()
-    conn.close()
+        print(
+            "\n========== TABLES ==========\n"
+        )
+
+        for table in tables:
+
+            print(
+                table[0]
+            )
+
+    finally:
+
+        cursor.close()
+        conn.close()
 
 
+# ======================================
+# Show Columns
+# ======================================
 
 def show_columns(table):
 
@@ -58,31 +79,33 @@ def show_columns(table):
         dictionary=True
     )
 
+    try:
 
-    print(
-        f"\n========== {table} COLUMNS ==========\n"
-    )
+        print(
+            f"\n========== {table} COLUMNS ==========\n"
+        )
+
+        cursor.execute(
+            f"""
+            SHOW COLUMNS FROM `{table}`
+            """
+        )
+
+        rows = cursor.fetchall()
+
+        for row in rows:
+
+            print(row)
+
+    finally:
+
+        cursor.close()
+        conn.close()
 
 
-    cursor.execute(
-        f"""
-        SHOW COLUMNS FROM {table}
-        """
-    )
-
-
-    rows = cursor.fetchall()
-
-
-    for row in rows:
-
-        print(row)
-
-
-    cursor.close()
-    conn.close()
-
-
+# ======================================
+# Show Create SQL
+# ======================================
 
 def show_create(table):
 
@@ -90,47 +113,57 @@ def show_create(table):
 
     cursor = conn.cursor()
 
+    try:
 
-    cursor.execute(
-        f"""
-        SHOW CREATE TABLE {table}
-        """
-    )
-
-
-    result = cursor.fetchone()
-
-
-    print(
-        "\n========== CREATE TABLE ==========\n"
-    )
-
-
-    if result:
-
-        print(
-            result[1]
+        cursor.execute(
+            f"""
+            SHOW CREATE TABLE `{table}`
+            """
         )
 
+        result = cursor.fetchone()
 
-    cursor.close()
-    conn.close()
+        print(
+            "\n========== CREATE TABLE ==========\n"
+        )
+
+        if result:
+
+            print(
+                result[1]
+            )
+
+    finally:
+
+        cursor.close()
+        conn.close()
 
 
+# ======================================
+# Main
+# ======================================
 
 def main():
 
-
     print(
-        "========== AutoSearch V4 Schema Check =========="
+        "========== AutoSearch V5 Schema Check =========="
     )
 
+    # ==================================
+    # Show All Tables
+    # ==================================
 
     show_tables()
 
-
+    # ==================================
+    # Tables To Inspect
+    # ==================================
 
     check_tables = [
+
+        # ==============================
+        # V4
+        # ==============================
 
         "articles",
 
@@ -142,14 +175,23 @@ def main():
 
         "search_index",
 
-        "raw_documents"
+        "raw_documents",
+
+        # ==============================
+        # V5
+        # ==============================
+
+        "targets",
+
+        "jobs",
 
     ]
 
-
+    # ==================================
+    # Inspect Tables
+    # ==================================
 
     for table in check_tables:
-
 
         try:
 
@@ -157,26 +199,28 @@ def main():
                 table
             )
 
-
             show_create(
                 table
             )
 
-
         except Exception as e:
-
 
             print(
                 f"\nSkip {table}: {e}"
             )
 
-
+    # ==================================
+    # Finished
+    # ==================================
 
     print(
         "\n========== Check Finished =========="
     )
 
 
+# ======================================
+# Entry Point
+# ======================================
 
 if __name__ == "__main__":
 

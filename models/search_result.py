@@ -1,26 +1,28 @@
 """
 models/search_result.py
 
-AutoSearch V4
+AutoSearch V5
 
-P4.1 Data Sources
+P5.6.4 / Search Result Model
 
-Search Result Model
+用途：
 
-用途:
-
-1. 統一不同 Search Source 的搜尋結果
+1. 統一不同 Search Provider 的搜尋結果
 2. 保存 Search Source 資訊
 3. 保存搜尋排名
-4. 保存原始搜尋 URL
-5. 支援 Search Adapter
-6. 後續轉換成 Article
+4. 保存搜尋關鍵字
+5. 保存原始搜尋結果 URL
+6. 支援 ProviderSearchAdapter
+7. 支援 SearchExecutionBridge
+8. 後續轉換成 Article
 
-Pipeline:
+Pipeline：
 
-Search Source
+Search Provider
     ↓
-Search Adapter
+ProviderSearchAdapter
+    ↓
+SearchExecutionBridge
     ↓
 SearchResult
     ↓
@@ -33,13 +35,15 @@ Parser
 Archive
 
 
-注意:
+注意：
 
-SearchResult 不負責:
+SearchResult 不負責：
 
+- HTTP Request
 - HTML Download
 - Parser
-- Article Archive
+- Article Crawl
+- Archive
 - AI Analysis
 - Database Storage
 """
@@ -47,12 +51,22 @@ SearchResult 不負責:
 
 class SearchResult:
     """
-    P4.1 Search Result Model。
+    V5 Search Result Model。
 
-    用來表示「搜尋引擎找到的結果」。
+    表示：
 
-    不代表已經完成爬取的 Article。
+        「Search Provider 找到的一筆搜尋結果」
+
+    不代表：
+
+        「已完成爬取的 Article」
     """
+
+    # ==================================================
+    #
+    # Constructor
+    #
+    # ==================================================
 
     def __init__(
         self,
@@ -64,41 +78,120 @@ class SearchResult:
         search_source="",
         rank=0,
     ):
-        # ==========================================
+        """
+        建立 SearchResult。
+
+        Parameters
+        ----------
+        keyword :
+            搜尋關鍵字。
+
+        title :
+            搜尋結果標題。
+
+        url :
+            搜尋結果 URL。
+
+        source :
+            原始內容來源。
+
+        published :
+            發布時間。
+
+        search_source :
+            搜尋來源，例如：
+
+                google_search
+                google_news
+
+        rank :
+            搜尋結果排名。
+        """
+
+        # ==================================================
         # Search Query
-        # ==========================================
+        # ==================================================
 
-        self.keyword = keyword
-
-        # ==========================================
-        # Search Result Basic Data
-        # ==========================================
-
-        self.title = title
-
-        self.url = url
-
-        self.source = source
-
-        self.published = published
-
-        # ==========================================
-        # P4.1 Search Source
-        # ==========================================
-
-        self.search_source = (
-            search_source
+        self.keyword = (
+            self._normalize_text(
+                keyword
+            )
         )
 
-        # ==========================================
+        # ==================================================
+        # Result Basic Data
+        # ==================================================
+
+        self.title = (
+            self._normalize_text(
+                title
+            )
+        )
+
+        self.url = (
+            self._normalize_text(
+                url
+            )
+        )
+
+        self.source = (
+            self._normalize_text(
+                source
+            )
+        )
+
+        self.published = (
+            published
+        )
+
+        # ==================================================
+        # Search Source
+        # ==================================================
+
+        self.search_source = (
+            self._normalize_text(
+                search_source
+            )
+        )
+
+        # ==================================================
         # Search Ranking
-        # ==========================================
+        # ==================================================
 
-        self.rank = rank
+        self.rank = (
+            self._normalize_rank(
+                rank
+            )
+        )
 
-    # ==============================================
-    # Convert To Dictionary
-    # ==============================================
+    # ==================================================
+    #
+    # Validation
+    #
+    # ==================================================
+
+    def is_valid(self):
+        """
+        判斷 SearchResult 是否具有最基本有效資料。
+
+        必須：
+
+            url 存在
+
+        keyword / title / source
+        可以為空，因為不同 Provider
+        提供的資料完整度可能不同。
+        """
+
+        return bool(
+            self.url
+        )
+
+    # ==================================================
+    #
+    # To Dictionary
+    #
+    # ==================================================
 
     def to_dict(self):
         """
@@ -106,35 +199,54 @@ class SearchResult:
         """
 
         return {
-            "keyword": self.keyword,
-            "title": self.title,
-            "url": self.url,
-            "source": self.source,
-            "published": self.published,
-            "search_source": self.search_source,
-            "rank": self.rank,
+            "keyword":
+                self.keyword,
+
+            "title":
+                self.title,
+
+            "url":
+                self.url,
+
+            "source":
+                self.source,
+
+            "published":
+                self.published,
+
+            "search_source":
+                self.search_source,
+
+            "rank":
+                self.rank,
         }
 
-    # ==============================================
-    # Convert To Article
-    # ==============================================
+    # ==================================================
+    #
+    # To Article
+    #
+    # ==================================================
 
     def to_article(self):
         """
         將 SearchResult 轉換成 Article。
 
-        注意:
+        SearchResult：
 
-        SearchResult 只包含搜尋資料。
+            Search Metadata
 
-        Article 後續才會加入:
+        Article：
 
-        - content
-        - crawl_time
-        - status
-        - document_id
-        - AI
-        - Archive
+            Crawl / Article Data
+
+        SearchResult 不直接負責：
+
+            content
+            crawl_time
+            status
+            document_id
+            AI
+            Archive
         """
 
         from models.article import Article
@@ -147,19 +259,95 @@ class SearchResult:
             source=self.source,
         )
 
-    # ==============================================
+    # ==================================================
+    #
     # Representation
-    # ==============================================
+    #
+    # ==================================================
 
     def __repr__(self):
         return (
             "SearchResult("
-            f"title={self.title}, "
-            f"url={self.url}, "
-            f"source={self.search_source}, "
+            f"title={self.title!r}, "
+            f"url={self.url!r}, "
+            f"source={self.search_source!r}, "
             f"rank={self.rank}"
             ")"
         )
+
+    # ==================================================
+    #
+    # Normalize Text
+    #
+    # ==================================================
+
+    @staticmethod
+    def _normalize_text(
+        value,
+    ):
+        """
+        Normalize 基本文字欄位。
+
+        None → ""
+
+        其他型別 → str(value).strip()
+        """
+
+        if value is None:
+
+            return ""
+
+        return str(
+            value
+        ).strip()
+
+    # ==================================================
+    #
+    # Normalize Rank
+    #
+    # ==================================================
+
+    @staticmethod
+    def _normalize_rank(
+        rank,
+    ):
+        """
+        Normalize Search Rank。
+
+        無效值：
+
+            → 0
+
+        Rank 不在 SearchResult
+        建立時強制要求 > 0。
+
+        因為：
+
+            SearchExecutionBridge
+            ProviderSearchAdapter
+            Provider
+
+        都可能在後續重新排序。
+        """
+
+        try:
+
+            value = int(
+                rank
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return 0
+
+        if value < 0:
+
+            return 0
+
+        return value
 
 
 __all__ = [

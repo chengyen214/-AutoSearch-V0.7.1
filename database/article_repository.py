@@ -1,34 +1,64 @@
 """
 database/article_repository.py
 
-AutoSearch V4
+AutoSearch V5
 
 Article Repository
 
-功能:
+用途：
 
-- Article CRUD
-- Article Query
-- AI Analysis Persistence
-- Async AI Pipeline Support
-- Article Management
-- Current Article Snapshot
+    負責 Article 的 Database Persistence。
 
-P2.4.1:
+Pipeline：
 
-- Article Storage 與 AI Analysis 解耦
-- Article 可以在沒有 AI Analysis 時先存入 Database
-- 未分析 AI fields 使用 NULL
-- ai_status 管理 Article AI Analysis 狀態
+    Crawl
+      ↓
+    Parser
+      ↓
+    Article
+      ↓
+    ArticleRepository
+      ↓
+    SQL
+      ↓
+    AI Task
+      ↓
+    AI Worker
+      ↓
+    ArticleRepository.update_ai_analysis()
 
-Database:
+Repository 負責：
 
-MySQL
+    - Article 儲存
+    - Article 基本查詢
+    - Document ID Duplicate Detection
+    - Article Model Restore
+    - Current Content Snapshot 更新
+    - Async AI Status
+    - AI Analysis Persistence
+    - Failed AI 查詢
+    - Article Count
+    - Article Management Persistence
+    - Database Connection Lifecycle
+
+Repository 不負責：
+
+    - Parser
+    - Crawler
+    - AI Analysis
+    - AI Worker
+    - Scheduler
+    - AI Batch Trigger
+    - Search Ranking
+    - Knowledge Processing
+    - Archive Version Creation
+    - Search
+    - Parser Registration
+    - SQL Schema / Migration
 """
 
 
 from datetime import datetime
-
 import json
 
 
@@ -54,22 +84,21 @@ from utils.logger import (
 
 class ArticleRepository:
     """
-    Article Repository
+    AutoSearch V5 Article Repository。
 
-    負責:
+    只負責 Article Database Persistence。
 
-        Article CRUD
-        Article Query
-        AI Analysis Persistence
-        Async AI Pipeline Support
-        Article Management
-
-    不負責:
+    不負責：
 
         AI Analysis
-        Archive Version Creation
-        Knowledge Processing
         Worker Scheduling
+        AI Batch Trigger
+        Search
+        Ranking
+        Knowledge
+        Archive Version
+        Parser
+        Crawler
     """
 
     # ==================================================
@@ -79,23 +108,19 @@ class ArticleRepository:
     def __init__(
         self
     ):
+        """
+        建立 Database Connection。
+        """
 
-        self.connection = (
-            get_connection()
-        )
+        self.connection = get_connection()
 
         if self.connection is None:
-
             raise Exception(
                 "Database connection failed."
             )
 
     # ==================================================
-    # Create Article
-    #
-    # P2.4.1
-    #
-    # Article Storage 與 AI Analysis 解耦
+    # Create
     # ==================================================
 
     def save(
@@ -105,15 +130,11 @@ class ArticleRepository:
         """
         儲存 Article。
 
-        P2.4.1 核心行為:
+        Article 在 Parser 完成後即可直接儲存。
 
-            Article 不存在
-                ↓
-            直接 INSERT
-                ↓
-            不要求 AI Analysis
+        AI Analysis 與 Article Storage 解耦。
 
-        尚未 AI Analysis:
+        尚未 AI Analysis：
 
             ai_summary      = NULL
             ai_category     = NULL
@@ -123,20 +144,19 @@ class ArticleRepository:
             ai_version      = NULL
             ai_analyze_time = NULL
             ai_confidence   = NULL
-
             ai_status       = pending
 
-        已有 AI Analysis:
+        已存在 AI Analysis：
 
-            AI fields 正常保存
+            保存 AI Analysis 結果
             ai_status = completed
 
-        Duplicate:
+        Duplicate：
 
             document_id 已存在
             → 不重複 INSERT
 
-        回傳:
+        回傳：
 
             True
                 成功
@@ -144,10 +164,6 @@ class ArticleRepository:
             False
                 失敗 / Duplicate
         """
-
-        # ==================================================
-        # Validate Article
-        # ==================================================
 
         if article is None:
 
@@ -157,10 +173,6 @@ class ArticleRepository:
             )
 
             return False
-
-        # ==================================================
-        # Document ID
-        # ==================================================
 
         document_id = getattr(
             article,
@@ -177,19 +189,12 @@ class ArticleRepository:
 
             return False
 
-        # ==================================================
-        # Duplicate Protection
-        #
-        # document_id 是 Article 唯一識別依據
-        # ==================================================
-
         if self.exists(
             document_id
         ):
 
             logger.info(
-                "Article exists: "
-                f"{getattr(article, 'title', '')}, "
+                "Article already exists: "
                 f"document_id={document_id}"
             )
 
@@ -198,60 +203,51 @@ class ArticleRepository:
         cursor = self.connection.cursor()
 
         sql = """
-
-        INSERT INTO articles
-
-        (
-            document_id,
-            keyword,
-            title,
-            url,
-            source,
-            published,
-            content,
-            crawl_time,
-            status,
-            ai_summary,
-            ai_category,
-            ai_keywords,
-            ai_importance,
-            ai_model,
-            ai_version,
-            ai_analyze_time,
-            ai_confidence,
-            ai_status
-        )
-
-        VALUES
-
-        (
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s
-        )
-
+            INSERT INTO articles
+            (
+                document_id,
+                keyword,
+                title,
+                url,
+                source,
+                published,
+                content,
+                crawl_time,
+                status,
+                ai_summary,
+                ai_category,
+                ai_keywords,
+                ai_importance,
+                ai_model,
+                ai_version,
+                ai_analyze_time,
+                ai_confidence,
+                ai_status
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
         """
 
         try:
-
-            # ==================================================
-            # Published
-            # ==================================================
 
             published = self._normalize_datetime(
                 getattr(
@@ -261,50 +257,22 @@ class ArticleRepository:
                 )
             )
 
-            # ==================================================
-            # P2.4.1
-            #
-            # Default AI Fields
-            #
-            # 尚未分析:
-            #
-            #     NULL
-            #
-            # 不再使用:
-            #
-            #     ""
-            #     "[]"
-            #     0
-            #     0.0
-            #
-            # 因為這些值可能是合法 AI 結果。
-            # ==================================================
+            crawl_time = getattr(
+                article,
+                "crawl_time",
+                None
+            )
 
             ai_summary = None
-
             ai_category = None
-
             ai_keywords = None
-
             ai_importance = None
-
             ai_model = None
-
             ai_version = None
-
             ai_analyze_time = None
-
             ai_confidence = None
 
             ai_status = "pending"
-
-            # ==================================================
-            # Existing AI Analysis
-            #
-            # 如果 Article 在進入 Repository 前
-            # 已經存在 AI Analysis，
-            # 則直接保存 AI 結果。
-            # ==================================================
 
             analysis = getattr(
                 article,
@@ -314,29 +282,17 @@ class ArticleRepository:
 
             if analysis is not None:
 
-                # ==============================================
-                # AI Summary
-                # ==============================================
-
                 ai_summary = getattr(
                     analysis,
                     "summary",
                     None
                 )
 
-                # ==============================================
-                # AI Category
-                # ==============================================
-
                 ai_category = getattr(
                     analysis,
                     "category",
                     None
                 )
-
-                # ==============================================
-                # AI Keywords
-                # ==============================================
 
                 keywords = getattr(
                     analysis,
@@ -351,14 +307,6 @@ class ArticleRepository:
                         ensure_ascii=False
                     )
 
-                else:
-
-                    ai_keywords = None
-
-                # ==============================================
-                # AI Importance
-                # ==============================================
-
                 ai_importance = getattr(
                     analysis,
                     "importance",
@@ -371,19 +319,11 @@ class ArticleRepository:
                         ai_importance
                     )
 
-                # ==============================================
-                # AI Model
-                # ==============================================
-
                 ai_model = getattr(
                     analysis,
                     "ai_model",
                     None
                 )
-
-                # ==============================================
-                # AI Version
-                # ==============================================
 
                 ai_version = getattr(
                     analysis,
@@ -391,19 +331,11 @@ class ArticleRepository:
                     None
                 )
 
-                # ==============================================
-                # AI Analyze Time
-                # ==============================================
-
                 ai_analyze_time = getattr(
                     analysis,
                     "analyze_time",
                     None
                 )
-
-                # ==============================================
-                # AI Confidence
-                # ==============================================
 
                 ai_confidence = getattr(
                     analysis,
@@ -417,22 +349,9 @@ class ArticleRepository:
                         ai_confidence
                     )
 
-                # ==============================================
-                # AI Status
-                # ==============================================
-
                 ai_status = "completed"
 
-            # ==================================================
-            # Values
-            # ==================================================
-
             values = (
-
-                # ----------------------------------------------
-                # Article
-                # ----------------------------------------------
-
                 document_id,
 
                 getattr(
@@ -467,11 +386,7 @@ class ArticleRepository:
                     ""
                 ),
 
-                getattr(
-                    article,
-                    "crawl_time",
-                    None
-                ),
+                crawl_time,
 
                 getattr(
                     article,
@@ -479,32 +394,16 @@ class ArticleRepository:
                     "Success"
                 ),
 
-                # ----------------------------------------------
-                # AI
-                # ----------------------------------------------
-
                 ai_summary,
-
                 ai_category,
-
                 ai_keywords,
-
                 ai_importance,
-
                 ai_model,
-
                 ai_version,
-
                 ai_analyze_time,
-
                 ai_confidence,
-
                 ai_status
             )
-
-            # ==================================================
-            # INSERT
-            # ==================================================
 
             cursor.execute(
                 sql,
@@ -513,19 +412,12 @@ class ArticleRepository:
 
             self.connection.commit()
 
-            # ==================================================
-            # Database ID
-            # ==================================================
-
-            article.id = (
-                cursor.lastrowid
-            )
+            article.id = cursor.lastrowid
 
             logger.info(
-                "Database saved: "
-                f"title={getattr(article, 'title', '')}, "
+                "Article saved: "
                 f"id={article.id}, "
-                f"ai_status={ai_status}"
+                f"document_id={document_id}"
             )
 
             return True
@@ -545,9 +437,7 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Insert Article
-    #
-    # P2.2.6 Compatibility Layer
+    # Insert
     # ==================================================
 
     def insert(
@@ -555,22 +445,22 @@ class ArticleRepository:
         article
     ):
         """
-        新 Pipeline:
+        Compatibility Layer。
 
-            repo.insert(article)
+        舊：
 
-        舊 Pipeline:
+            repository.insert(article)
 
-            repo.save(article)
+        新：
 
-        統一導向 save()。
+            repository.save(article)
+
+        統一使用 save()。
         """
 
-        result = self.save(
+        if not self.save(
             article
-        )
-
-        if result is False:
+        ):
 
             return None
 
@@ -585,7 +475,7 @@ class ArticleRepository:
         limit=None
     ):
         """
-        取得全部 Article。
+        取得 Article。
         """
 
         cursor = self.connection.cursor(
@@ -595,21 +485,15 @@ class ArticleRepository:
         try:
 
             sql = """
-
-            SELECT *
-
-            FROM articles
-
-            ORDER BY id DESC
-
+                SELECT *
+                FROM articles
+                ORDER BY id DESC
             """
 
             if limit is not None:
 
                 sql += """
-
-                LIMIT %s
-
+                    LIMIT %s
                 """
 
                 cursor.execute(
@@ -640,7 +524,7 @@ class ArticleRepository:
         article_id
     ):
         """
-        依 ID 查詢 Article。
+        依 Database ID 查詢 Article。
         """
 
         cursor = self.connection.cursor(
@@ -650,21 +534,14 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT *
-
                 FROM articles
-
                 WHERE id=%s
-
                 """,
-
                 (
                     article_id,
                 )
-
             )
 
             return cursor.fetchone()
@@ -674,9 +551,7 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Find Article Model By ID
-    #
-    # AI Worker
+    # Query Article Model By ID
     # ==================================================
 
     def find_model_by_id(
@@ -688,7 +563,12 @@ class ArticleRepository:
             ↓
         Article Model
 
-        AI Worker 使用。
+        主要供：
+
+            AI Worker
+            AI Service
+
+        使用。
         """
 
         row = self.find_by_id(
@@ -698,13 +578,12 @@ class ArticleRepository:
         if row is None:
 
             logger.warning(
-                f"Article not found id={article_id}"
+                f"Article not found: id={article_id}"
             )
 
             return None
 
         article = Article(
-
             keyword=row.get(
                 "keyword",
                 ""
@@ -721,8 +600,7 @@ class ArticleRepository:
             ),
 
             published=row.get(
-                "published",
-                None
+                "published"
             ),
 
             source=row.get(
@@ -736,143 +614,120 @@ class ArticleRepository:
             ),
 
             crawl_time=row.get(
-                "crawl_time",
-                None
+                "crawl_time"
             ),
 
             status=row.get(
                 "status",
                 "Success"
+            ),
+
+            document_id=row.get(
+                "document_id",
+                ""
             )
         )
-
-        # ==================================================
-        # Database Identity
-        # ==================================================
 
         article.id = row.get(
             "id"
         )
-
-        article.document_id = row.get(
-            "document_id",
-            ""
-        )
-
-        # ==================================================
-        # AI Status
-        # ==================================================
 
         article.ai_status = row.get(
             "ai_status",
             "pending"
         )
 
-        # ==================================================
-        # Restore AI Analysis
-        # ==================================================
-
         ai_summary = row.get(
-            "ai_summary",
-            None
+            "ai_summary"
         )
 
-        if ai_summary is not None:
+        if ai_summary is None:
 
-            try:
+            article.ai_analysis = None
 
-                keywords = row.get(
-                    "ai_keywords",
-                    None
-                )
+            return article
 
-                if isinstance(
-                    keywords,
-                    str
-                ):
+        try:
 
-                    try:
+            keywords = row.get(
+                "ai_keywords"
+            )
 
-                        keywords = json.loads(
-                            keywords
-                        )
+            if isinstance(
+                keywords,
+                str
+            ):
 
-                    except json.JSONDecodeError:
+                try:
 
-                        keywords = []
+                    keywords = json.loads(
+                        keywords
+                    )
 
-                if keywords is None:
+                except json.JSONDecodeError:
 
                     keywords = []
 
-                analysis = AIAnalysis(
+            if keywords is None:
 
-                    article_id=article.id,
+                keywords = []
 
-                    summary=ai_summary,
+            analysis = AIAnalysis(
 
-                    category=row.get(
-                        "ai_category",
-                        None
-                    ),
+                article_id=article.id,
 
-                    keywords=keywords,
+                summary=ai_summary,
 
-                    importance=row.get(
-                        "ai_importance",
-                        None
-                    ),
+                category=row.get(
+                    "ai_category"
+                ),
 
-                    ai_model=row.get(
-                        "ai_model",
-                        None
-                    ),
+                keywords=keywords,
 
-                    ai_version=row.get(
-                        "ai_version",
-                        None
-                    ),
+                importance=row.get(
+                    "ai_importance"
+                ),
 
-                    analyze_time=row.get(
-                        "ai_analyze_time",
-                        None
-                    ),
+                ai_model=row.get(
+                    "ai_model"
+                ),
 
-                    confidence=row.get(
-                        "ai_confidence",
-                        None
-                    )
+                ai_version=row.get(
+                    "ai_version"
+                ),
+
+                analyze_time=row.get(
+                    "ai_analyze_time"
+                ),
+
+                confidence=row.get(
+                    "ai_confidence"
                 )
+            )
 
-                article.ai_analysis = (
-                    analysis
-                )
+            article.ai_analysis = analysis
 
-            except Exception as e:
+        except Exception as e:
 
-                logger.exception(
-                    "Restore AI Analysis failed: "
-                    f"{e}"
-                )
-
-                article.ai_analysis = None
-
-        else:
+            logger.exception(
+                "Restore AI Analysis failed: "
+                f"{e}"
+            )
 
             article.ai_analysis = None
 
         return article
 
     # ==================================================
-    # Query By Source
+    # Query By URL
     # ==================================================
 
-    def find_by_source(
+    def find_by_url(
         self,
-        source
+        url
     ):
         """
-        依 Source 查詢。
+        依 URL 查詢目前 Article。
         """
 
         cursor = self.connection.cursor(
@@ -882,26 +737,118 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT *
-
                 FROM articles
-
-                WHERE source LIKE %s
-
+                WHERE url=%s
                 ORDER BY id DESC
-
+                LIMIT 1
                 """,
-
                 (
-                    "%" + source + "%",
+                    url,
                 )
-
             )
 
-            return cursor.fetchall()
+            return cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Query By Document ID
+    # ==================================================
+
+    def find_by_document_id(
+        self,
+        document_id
+    ):
+        """
+        依 Document ID 查詢 Article。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM articles
+                WHERE document_id=%s
+                LIMIT 1
+                """,
+                (
+                    document_id,
+                )
+            )
+
+            return cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Compatibility
+    # ==================================================
+
+    def get_by_document_id(
+        self,
+        document_id
+    ):
+        """
+        Compatibility Alias。
+
+        舊程式可能使用：
+
+            get_by_document_id()
+
+        統一轉向：
+
+            find_by_document_id()
+        """
+
+        return self.find_by_document_id(
+            document_id
+        )
+
+    # ==================================================
+    # Duplicate Detection
+    # ==================================================
+
+    def exists(
+        self,
+        document_id
+    ):
+        """
+        檢查 document_id 是否已存在。
+        """
+
+        cursor = self.connection.cursor()
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM articles
+                WHERE document_id=%s
+                """,
+                (
+                    document_id,
+                )
+            )
+
+            result = cursor.fetchone()
+
+            if result is None:
+
+                return False
+
+            return result[0] > 0
 
         finally:
 
@@ -916,7 +863,7 @@ class ArticleRepository:
         keyword
     ):
         """
-        依一般 Keyword 查詢。
+        依 Keyword 查詢 Article。
         """
 
         cursor = self.connection.cursor(
@@ -926,23 +873,15 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT *
-
                 FROM articles
-
-                WHERE keyword LIKE %s
-
+                WHERE keyword=%s
                 ORDER BY id DESC
-
                 """,
-
                 (
-                    "%" + keyword + "%",
+                    keyword,
                 )
-
             )
 
             return cursor.fetchall()
@@ -952,18 +891,15 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Find Article By URL
-    #
-    # V4 Archive History
+    # Query By Source
     # ==================================================
 
-    def find_by_url(
+    def find_by_source(
         self,
-        url
+        source
     ):
         """
-        URL 是 Article History
-        Detection 的主要識別依據。
+        依 Source 查詢 Article。
         """
 
         cursor = self.connection.cursor(
@@ -973,43 +909,33 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT *
-
                 FROM articles
-
-                WHERE url=%s
-
+                WHERE source=%s
                 ORDER BY id DESC
-
-                LIMIT 1
-
                 """,
-
                 (
-                    url,
+                    source,
                 )
-
             )
 
-            return cursor.fetchone()
+            return cursor.fetchall()
 
         finally:
 
             cursor.close()
 
     # ==================================================
-    # Find Article By Document ID
+    # Query By AI Importance
     # ==================================================
 
-    def find_by_document_id(
+    def find_by_importance(
         self,
-        document_id
+        level
     ):
         """
-        依目前 Document Hash 查詢 Article。
+        取得 AI Importance >= level。
         """
 
         cursor = self.connection.cursor(
@@ -1019,80 +945,144 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT *
-
                 FROM articles
-
-                WHERE document_id=%s
-
-                LIMIT 1
-
+                WHERE ai_importance >= %s
+                ORDER BY ai_importance DESC, id DESC
                 """,
-
                 (
-                    document_id,
+                    level,
                 )
-
             )
 
-            return cursor.fetchone()
+            return cursor.fetchall()
 
         finally:
 
             cursor.close()
 
     # ==================================================
-    # Duplicate Check
+    # Query By AI Category
     # ==================================================
 
-    def exists(
+    def find_by_category(
         self,
-        document_id
+        category
     ):
         """
-        檢查 document_id 是否存在。
+        依 AI Category 查詢。
         """
 
-        cursor = self.connection.cursor()
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
 
         try:
 
             cursor.execute(
-
                 """
-
-                SELECT COUNT(*)
-
+                SELECT *
                 FROM articles
-
-                WHERE document_id=%s
-
+                WHERE ai_category=%s
+                ORDER BY id DESC
                 """,
-
                 (
-                    document_id,
+                    category,
                 )
-
             )
 
-            result = cursor.fetchone()
-
-            return (
-                result is not None
-                and result[0] > 0
-            )
+            return cursor.fetchall()
 
         finally:
 
             cursor.close()
 
     # ==================================================
-    # Update Current Content Snapshot
-    #
-    # V4 Archive History
+    # Query By AI Keyword
+    # ==================================================
+
+    def find_by_ai_keyword(
+        self,
+        keyword
+    ):
+        """
+        依 AI Keyword 搜尋。
+
+        ai_keywords 儲存為 JSON。
+
+        使用 LIKE 而非 JSON_CONTAINS，
+        保持對既有資料格式的相容性。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            pattern = f"%{keyword}%"
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM articles
+                WHERE ai_keywords LIKE %s
+                ORDER BY id DESC
+                """,
+                (
+                    pattern,
+                )
+            )
+
+            return cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # AI Top
+    # ==================================================
+
+    def get_top_ai_articles(
+        self,
+        limit=10
+    ):
+        """
+        取得 AI Importance 最高的 Article。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM articles
+                WHERE ai_importance IS NOT NULL
+                ORDER BY
+                    ai_importance DESC,
+                    ai_confidence DESC,
+                    id DESC
+                LIMIT %s
+                """,
+                (
+                    int(limit),
+                )
+            )
+
+            return cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Current Content Snapshot
     # ==================================================
 
     def update_content_snapshot(
@@ -1104,37 +1094,28 @@ class ArticleRepository:
         status=None
     ):
         """
-        更新 Article 目前版本 Snapshot。
+        更新 Article Current Snapshot。
 
-        Archive:
-
-            archive_versions
-            ↓
-            保存歷史
-
-        Article:
+        Article：
 
             articles.content
             articles.document_id
-            ↓
-            保存目前版本
 
-        不修改:
+        代表：
 
-            AI fields
-            Archive fields
+            目前最新版本。
+
+        歷史版本：
+
+            由 Archive Pipeline
+            另外處理。
+
+        本方法不處理：
+
+            AI
+            Archive
+            Knowledge
         """
-
-        if self.find_by_id(
-            article_id
-        ) is None:
-
-            logger.warning(
-                "Snapshot update failed: "
-                f"article not found id={article_id}"
-            )
-
-            return False
 
         fields = [
             "document_id=%s",
@@ -1171,15 +1152,9 @@ class ArticleRepository:
         )
 
         sql = f"""
-
-        UPDATE articles
-
-        SET
-
-            {", ".join(fields)}
-
-        WHERE id=%s
-
+            UPDATE articles
+            SET {", ".join(fields)}
+            WHERE id=%s
         """
 
         cursor = self.connection.cursor()
@@ -1191,19 +1166,28 @@ class ArticleRepository:
                 tuple(values)
             )
 
-            self.connection.commit()
-
             affected = cursor.rowcount
 
-            if affected > 0:
+            if affected <= 0:
 
-                logger.info(
-                    "Article snapshot updated: "
-                    f"id={article_id}, "
-                    f"document_id={document_id}"
+                self.connection.rollback()
+
+                logger.warning(
+                    "Article snapshot update failed: "
+                    f"id={article_id}"
                 )
 
-            return affected > 0
+                return False
+
+            self.connection.commit()
+
+            logger.info(
+                "Article snapshot updated: "
+                f"id={article_id}, "
+                f"document_id={document_id}"
+            )
+
+            return True
 
         except Exception as e:
 
@@ -1221,652 +1205,7 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Find Pending AI
-    #
-    # Async AI Worker Compatibility
-    # ==================================================
-
-    def find_pending_ai(
-        self,
-        limit=20
-    ):
-        """
-        取得尚未完成 AI Analysis 的 Article。
-
-        P2.4.1:
-
-            NULL / pending
-            都視為尚未完成 AI。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE
-
-                    ai_status IS NULL
-
-                    OR ai_status='pending'
-
-                ORDER BY id ASC
-
-                LIMIT %s
-
-                """,
-
-                (
-                    int(limit),
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # Update AI Status
-    # ==================================================
-
-    def update_ai_status(
-        self,
-        article_id,
-        status
-    ):
-        """
-        更新 Article AI Status。
-
-        使用 UPDATE rowcount
-        判斷 Article 是否存在。
-
-        注意:
-
-            不先呼叫 find_by_id()，
-            避免產生額外 SQL。
-        """
-
-        cursor = self.connection.cursor()
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                UPDATE articles
-
-                SET ai_status=%s
-
-                WHERE id=%s
-
-                """,
-
-                (
-                    status,
-                    article_id
-                )
-
-            )
-
-            affected = cursor.rowcount
-
-            if affected <= 0:
-
-                self.connection.rollback()
-
-                logger.warning(
-                    "Update AI status failed: "
-                    f"article not found id={article_id}"
-                )
-
-                return False
-
-            self.connection.commit()
-
-            logger.info(
-                "AI status updated: "
-                f"article={article_id}, "
-                f"status={status}"
-            )
-
-            return True
-
-        except Exception as e:
-
-            self.connection.rollback()
-
-            logger.exception(
-                "Update AI status failed: "
-                f"{e}"
-            )
-
-            return False
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # Get AI Status
-    # ==================================================
-
-    def get_ai_status(
-        self,
-        article_id
-    ):
-        """
-        取得 AI Status。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT
-
-                    id,
-
-                    ai_status
-
-                FROM articles
-
-                WHERE id=%s
-
-                """,
-
-                (
-                    article_id,
-                )
-
-            )
-
-            return cursor.fetchone()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # Update AI Analysis
-    # ==================================================
-
-    def update_ai_analysis(
-        self,
-        article
-    ):
-        """
-        儲存 AI Analysis Result。
-
-        AI Worker 完成分析後呼叫。
-
-        P2.4.1:
-
-            AI Analysis 完成後，
-            將 NULL AI fields 更新成實際結果。
-        """
-
-        if article is None:
-
-            logger.error(
-                "AI Update failed: "
-                "article is None"
-            )
-
-            return False
-
-        if article.id is None:
-
-            logger.error(
-                "AI Update failed: "
-                "Article ID None"
-            )
-
-            return False
-
-        analysis = getattr(
-            article,
-            "ai_analysis",
-            None
-        )
-
-        if analysis is None:
-
-            logger.warning(
-                "AI Update skipped: "
-                "No Analysis"
-            )
-
-            return False
-
-        cursor = self.connection.cursor()
-
-        sql = """
-
-        UPDATE articles
-
-        SET
-
-            ai_summary=%s,
-
-            ai_category=%s,
-
-            ai_keywords=%s,
-
-            ai_importance=%s,
-
-            ai_model=%s,
-
-            ai_version=%s,
-
-            ai_analyze_time=%s,
-
-            ai_confidence=%s,
-
-            ai_status=%s
-
-        WHERE id=%s
-
-        """
-
-        try:
-
-            # ==================================================
-            # Keywords
-            # ==================================================
-
-            keywords = getattr(
-                analysis,
-                "keywords",
-                None
-            )
-
-            if keywords is not None:
-
-                ai_keywords = json.dumps(
-                    keywords,
-                    ensure_ascii=False
-                )
-
-            else:
-
-                ai_keywords = None
-
-            # ==================================================
-            # Importance
-            # ==================================================
-
-            importance = getattr(
-                analysis,
-                "importance",
-                None
-            )
-
-            if importance is not None:
-
-                importance = int(
-                    importance
-                )
-
-            # ==================================================
-            # Confidence
-            # ==================================================
-
-            confidence = getattr(
-                analysis,
-                "confidence",
-                None
-            )
-
-            if confidence is not None:
-
-                confidence = float(
-                    confidence
-                )
-
-            # ==================================================
-            # Values
-            # ==================================================
-
-            values = (
-
-                getattr(
-                    analysis,
-                    "summary",
-                    None
-                ),
-
-                getattr(
-                    analysis,
-                    "category",
-                    None
-                ),
-
-                ai_keywords,
-
-                importance,
-
-                getattr(
-                    analysis,
-                    "ai_model",
-                    None
-                ),
-
-                getattr(
-                    analysis,
-                    "ai_version",
-                    None
-                ),
-
-                getattr(
-                    analysis,
-                    "analyze_time",
-                    None
-                ),
-
-                confidence,
-
-                "completed",
-
-                article.id
-            )
-
-            cursor.execute(
-                sql,
-                values
-            )
-
-            self.connection.commit()
-
-            affected = cursor.rowcount
-
-            logger.info(
-                "AI Analysis updated: "
-                f"article={article.id}"
-            )
-
-            return affected > 0
-
-        except Exception as e:
-
-            self.connection.rollback()
-
-            logger.exception(
-                "AI Analysis update failed: "
-                f"{e}"
-            )
-
-            return False
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # Find Failed AI
-    # ==================================================
-
-    def find_failed_ai(
-        self,
-        limit=20
-    ):
-        """
-        取得 AI Analysis Failed Articles。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE ai_status='failed'
-
-                ORDER BY id ASC
-
-                LIMIT %s
-
-                """,
-
-                (
-                    int(limit),
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # AI Importance
-    # ==================================================
-
-    def find_by_importance(
-        self,
-        level
-    ):
-        """
-        AI Importance >= level。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE ai_importance >= %s
-
-                ORDER BY ai_importance DESC
-
-                """,
-
-                (
-                    level,
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # AI Category
-    # ==================================================
-
-    def find_by_category(
-        self,
-        category
-    ):
-        """
-        AI Category 查詢。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE LOWER(ai_category)=LOWER(%s)
-
-                ORDER BY ai_importance DESC
-
-                """,
-
-                (
-                    category,
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # AI Keyword
-    # ==================================================
-
-    def find_by_ai_keyword(
-        self,
-        keyword
-    ):
-        """
-        AI Keyword 查詢。
-
-        ai_keywords 目前以 JSON
-        儲存在資料庫。
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE ai_keywords LIKE %s
-
-                ORDER BY ai_importance DESC
-
-                """,
-
-                (
-                    "%" + keyword + "%",
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # AI Top Articles
-    #
-    # P3.5.6 AI Analysis API
-    # ==================================================
-
-    def get_top_ai_articles(
-        self,
-        limit=10
-    ):
-        """
-        取得 AI Importance 最高的 Articles。
-
-        只取得已完成 AI Analysis 的文章。
-
-        排序:
-
-            1. ai_importance DESC
-            2. ai_confidence DESC
-            3. ai_analyze_time DESC
-        """
-
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
-
-        try:
-
-            cursor.execute(
-
-                """
-
-                SELECT *
-
-                FROM articles
-
-                WHERE ai_status='completed'
-
-                ORDER BY
-
-                    ai_importance DESC,
-
-                    ai_confidence DESC,
-
-                    ai_analyze_time DESC
-
-                LIMIT %s
-
-                """,
-
-                (
-                    int(limit),
-                )
-
-            )
-
-            return cursor.fetchall()
-
-        finally:
-
-            cursor.close()
-
-    # ==================================================
-    # Update Article Metadata
-    #
-    # P3.2 Article Management
+    # Article Metadata Update
     # ==================================================
 
     def update(
@@ -1882,31 +1221,17 @@ class ArticleRepository:
         """
         更新 Article Metadata。
 
-        可更新:
+        只處理 Article 基本欄位。
 
-            keyword
-            title
-            url
-            source
-            published
-            status
+        不處理：
 
-        不更新:
-
-            document_id
-            content
-            AI fields
-            Archive fields
+            AI Analysis
+            Archive
+            Knowledge
+            AI Task
         """
 
-        if self.find_by_id(
-            article_id
-        ) is None:
-
-            logger.warning(
-                "Article update failed: "
-                f"article not found id={article_id}"
-            )
+        if article_id is None:
 
             return False
 
@@ -1955,27 +1280,14 @@ class ArticleRepository:
 
         if published is not None:
 
-            normalized_published = (
-                self._normalize_datetime(
-                    published
-                )
-            )
-
-            if normalized_published is None:
-
-                logger.warning(
-                    "Invalid published datetime: "
-                    f"{published}"
-                )
-
-                return False
-
             fields.append(
                 "published=%s"
             )
 
             values.append(
-                normalized_published
+                self._normalize_datetime(
+                    published
+                )
             )
 
         if status is not None:
@@ -1992,8 +1304,7 @@ class ArticleRepository:
 
             logger.warning(
                 "Article update skipped: "
-                f"no fields provided, "
-                f"id={article_id}"
+                "no fields provided"
             )
 
             return False
@@ -2003,15 +1314,9 @@ class ArticleRepository:
         )
 
         sql = f"""
-
-        UPDATE articles
-
-        SET
-
-            {", ".join(fields)}
-
-        WHERE id=%s
-
+            UPDATE articles
+            SET {", ".join(fields)}
+            WHERE id=%s
         """
 
         cursor = self.connection.cursor()
@@ -2023,24 +1328,35 @@ class ArticleRepository:
                 tuple(values)
             )
 
-            self.connection.commit()
-
             affected = cursor.rowcount
 
+            if affected <= 0:
+
+                self.connection.rollback()
+
+                logger.warning(
+                    "Article metadata update failed: "
+                    f"id={article_id}"
+                )
+
+                return False
+
+            self.connection.commit()
+
             logger.info(
-                "Article updated: "
-                f"id={article_id}, "
-                f"fields={fields}"
+                "Article metadata updated: "
+                f"id={article_id}"
             )
 
-            return affected > 0
+            return True
 
         except Exception as e:
 
             self.connection.rollback()
 
             logger.exception(
-                f"Article update failed: {e}"
+                "Article metadata update failed: "
+                f"{e}"
             )
 
             return False
@@ -2050,9 +1366,400 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Delete Article
-    #
-    # P3.2 Article Management
+    # Async AI
+    # ==================================================
+
+    def find_pending_ai(
+        self,
+        limit=20
+    ):
+        """
+        取得尚未完成 AI Analysis 的 Article。
+
+        狀態：
+
+            NULL
+            pending
+
+        都視為待分析。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM articles
+                WHERE
+                    ai_status IS NULL
+                    OR ai_status='pending'
+                ORDER BY id ASC
+                LIMIT %s
+                """,
+                (
+                    int(limit),
+                )
+            )
+
+            return cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Update AI Status
+    # ==================================================
+
+    def update_ai_status(
+        self,
+        article_id,
+        status
+    ):
+        """
+        更新 Article AI Status。
+
+        可能狀態：
+
+            pending
+            processing
+            completed
+            failed
+        """
+
+        cursor = self.connection.cursor()
+
+        try:
+
+            cursor.execute(
+                """
+                UPDATE articles
+                SET ai_status=%s
+                WHERE id=%s
+                """,
+                (
+                    status,
+                    article_id
+                )
+            )
+
+            affected = cursor.rowcount
+
+            if affected <= 0:
+
+                self.connection.rollback()
+
+                logger.warning(
+                    "AI status update failed: "
+                    f"id={article_id}"
+                )
+
+                return False
+
+            self.connection.commit()
+
+            logger.info(
+                "AI status updated: "
+                f"id={article_id}, "
+                f"status={status}"
+            )
+
+            return True
+
+        except Exception as e:
+
+            self.connection.rollback()
+
+            logger.exception(
+                "AI status update failed: "
+                f"{e}"
+            )
+
+            return False
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Get AI Status
+    # ==================================================
+
+    def get_ai_status(
+        self,
+        article_id
+    ):
+        """
+        取得 Article AI Status。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    ai_status
+                FROM articles
+                WHERE id=%s
+                """,
+                (
+                    article_id,
+                )
+            )
+
+            return cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Update AI Analysis
+    # ==================================================
+
+    def update_ai_analysis(
+        self,
+        article
+    ):
+        """
+        儲存 AI Analysis Result。
+
+        AI Worker 完成：
+
+            Article
+              ↓
+            AIAnalysis
+              ↓
+            update_ai_analysis()
+              ↓
+            articles
+        """
+
+        if article is None:
+
+            logger.error(
+                "AI Analysis update failed: "
+                "article is None"
+            )
+
+            return False
+
+        if article.id is None:
+
+            logger.error(
+                "AI Analysis update failed: "
+                "article.id is None"
+            )
+
+            return False
+
+        analysis = getattr(
+            article,
+            "ai_analysis",
+            None
+        )
+
+        if analysis is None:
+
+            logger.warning(
+                "AI Analysis update skipped: "
+                "no AI Analysis"
+            )
+
+            return False
+
+        cursor = self.connection.cursor()
+
+        sql = """
+            UPDATE articles
+            SET
+                ai_summary=%s,
+                ai_category=%s,
+                ai_keywords=%s,
+                ai_importance=%s,
+                ai_model=%s,
+                ai_version=%s,
+                ai_analyze_time=%s,
+                ai_confidence=%s,
+                ai_status=%s
+            WHERE id=%s
+        """
+
+        try:
+
+            keywords = getattr(
+                analysis,
+                "keywords",
+                None
+            )
+
+            if keywords is not None:
+
+                ai_keywords = json.dumps(
+                    keywords,
+                    ensure_ascii=False
+                )
+
+            else:
+
+                ai_keywords = None
+
+            importance = getattr(
+                analysis,
+                "importance",
+                None
+            )
+
+            if importance is not None:
+
+                importance = int(
+                    importance
+                )
+
+            confidence = getattr(
+                analysis,
+                "confidence",
+                None
+            )
+
+            if confidence is not None:
+
+                confidence = float(
+                    confidence
+                )
+
+            values = (
+                getattr(
+                    analysis,
+                    "summary",
+                    None
+                ),
+
+                getattr(
+                    analysis,
+                    "category",
+                    None
+                ),
+
+                ai_keywords,
+
+                importance,
+
+                getattr(
+                    analysis,
+                    "ai_model",
+                    None
+                ),
+
+                getattr(
+                    analysis,
+                    "ai_version",
+                    None
+                ),
+
+                getattr(
+                    analysis,
+                    "analyze_time",
+                    None
+                ),
+
+                confidence,
+
+                "completed",
+
+                article.id
+            )
+
+            cursor.execute(
+                sql,
+                values
+            )
+
+            affected = cursor.rowcount
+
+            if affected <= 0:
+
+                self.connection.rollback()
+
+                logger.warning(
+                    "AI Analysis update failed: "
+                    f"article not found id={article.id}"
+                )
+
+                return False
+
+            self.connection.commit()
+
+            logger.info(
+                "AI Analysis saved: "
+                f"article={article.id}"
+            )
+
+            return True
+
+        except Exception as e:
+
+            self.connection.rollback()
+
+            logger.exception(
+                "AI Analysis update failed: "
+                f"{e}"
+            )
+
+            return False
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Find Failed AI
+    # ==================================================
+
+    def find_failed_ai(
+        self,
+        limit=20
+    ):
+        """
+        取得 AI Analysis Failed Articles。
+        """
+
+        cursor = self.connection.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM articles
+                WHERE ai_status='failed'
+                ORDER BY id ASC
+                LIMIT %s
+                """,
+                (
+                    int(limit),
+                )
+            )
+
+            return cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+
+    # ==================================================
+    # Delete
     # ==================================================
 
     def delete(
@@ -2062,204 +1769,95 @@ class ArticleRepository:
         """
         刪除 Article。
 
-        Archive Protection:
+        注意：
 
-            archive_versions
-            raw_documents
-            ai_tasks
-            knowledge_archive
+            ArticleService 不直接操作 SQL。
 
-        任一存在時拒絕刪除。
+            Repository 在刪除前，
+            先確認 Article 是否存在。
+
+        若 Database Schema 已透過
+        Foreign Key 保護相關資料，
+        DELETE 失敗時直接 rollback。
+
+        Repository 不主動刪除：
+
+            Archive
+            Raw Document
+            AI Task
+            Knowledge Archive
         """
 
-        article = self.find_by_id(
-            article_id
-        )
-
-        if article is None:
-
-            logger.warning(
-                "Article delete failed: "
-                f"article not found id={article_id}"
-            )
+        if article_id is None:
 
             return False
 
-        cursor = self.connection.cursor(
-            dictionary=True
-        )
+        cursor = self.connection.cursor()
 
         try:
 
-            # ==================================================
-            # Archive Versions
-            # ==================================================
-
             cursor.execute(
-
                 """
-
-                SELECT COUNT(*) AS count
-
-                FROM archive_versions
-
-                WHERE article_id=%s
-
+                SELECT id
+                FROM articles
+                WHERE id=%s
                 """,
-
                 (
                     article_id,
                 )
-
             )
 
-            archive_count = (
-                cursor.fetchone()["count"]
-            )
+            row = cursor.fetchone()
 
-            # ==================================================
-            # Raw Documents
-            # ==================================================
-
-            cursor.execute(
-
-                """
-
-                SELECT COUNT(*) AS count
-
-                FROM raw_documents
-
-                WHERE article_id=%s
-
-                """,
-
-                (
-                    article_id,
-                )
-
-            )
-
-            raw_count = (
-                cursor.fetchone()["count"]
-            )
-
-            # ==================================================
-            # AI Tasks
-            # ==================================================
-
-            cursor.execute(
-
-                """
-
-                SELECT COUNT(*) AS count
-
-                FROM ai_tasks
-
-                WHERE article_id=%s
-
-                """,
-
-                (
-                    article_id,
-                )
-
-            )
-
-            task_count = (
-                cursor.fetchone()["count"]
-            )
-
-            # ==================================================
-            # Knowledge Archive
-            # ==================================================
-
-            cursor.execute(
-
-                """
-
-                SELECT COUNT(*) AS count
-
-                FROM knowledge_archive
-
-                WHERE article_id=%s
-
-                """,
-
-                (
-                    article_id,
-                )
-
-            )
-
-            knowledge_count = (
-                cursor.fetchone()["count"]
-            )
-
-            # ==================================================
-            # Archive Protection
-            # ==================================================
-
-            if (
-                archive_count > 0
-                or raw_count > 0
-                or task_count > 0
-                or knowledge_count > 0
-            ):
+            if row is None:
 
                 logger.warning(
-
-                    "Article delete blocked: "
-                    f"id={article_id}, "
-                    f"archive_versions={archive_count}, "
-                    f"raw_documents={raw_count}, "
-                    f"ai_tasks={task_count}, "
-                    f"knowledge_archive="
-                    f"{knowledge_count}"
-
+                    "Article delete failed: "
+                    f"id={article_id} not found"
                 )
 
                 return False
 
-            # ==================================================
-            # Delete Article
-            # ==================================================
-
             cursor.execute(
-
                 """
-
                 DELETE FROM articles
-
                 WHERE id=%s
-
                 """,
-
                 (
                     article_id,
                 )
-
             )
 
             affected = cursor.rowcount
 
-            self.connection.commit()
+            if affected <= 0:
 
-            if affected > 0:
+                self.connection.rollback()
 
-                logger.info(
-                    f"Article deleted: id={article_id}"
+                logger.warning(
+                    "Article delete failed: "
+                    f"id={article_id}"
                 )
 
-                return True
+                return False
 
-            return False
+            self.connection.commit()
+
+            logger.info(
+                "Article deleted: "
+                f"id={article_id}"
+            )
+
+            return True
 
         except Exception as e:
 
             self.connection.rollback()
 
             logger.exception(
-                f"Article delete failed: {e}"
+                "Article delete failed: "
+                f"id={article_id}, "
+                f"error={e}"
             )
 
             return False
@@ -2269,14 +1867,14 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Count Articles
+    # Count
     # ==================================================
 
     def count(
         self
     ):
         """
-        Article Count。
+        取得 Article 總數。
         """
 
         cursor = self.connection.cursor()
@@ -2284,15 +1882,10 @@ class ArticleRepository:
         try:
 
             cursor.execute(
-
                 """
-
                 SELECT COUNT(*)
-
                 FROM articles
-
                 """
-
             )
 
             result = cursor.fetchone()
@@ -2308,7 +1901,7 @@ class ArticleRepository:
             cursor.close()
 
     # ==================================================
-    # Normalize Datetime
+    # Datetime Normalization
     # ==================================================
 
     @staticmethod
@@ -2318,13 +1911,14 @@ class ArticleRepository:
         """
         將不同格式的日期轉成 datetime。
 
-        支援:
+        支援：
 
             datetime
             None
             YYYY-MM-DD HH:MM:SS
             YYYY-MM-DD
-            RFC 822 / RSS
+            RFC 822
+            RSS datetime
         """
 
         if value is None:
@@ -2364,7 +1958,6 @@ class ArticleRepository:
             "%a, %d %b %Y %H:%M:%S +0000",
 
             "%a, %d %b %Y %H:%M:%S %z"
-
         ]
 
         for fmt in formats:
@@ -2396,14 +1989,6 @@ class ArticleRepository:
     ):
         """
         關閉 Database Connection。
-
-        注意:
-
-            保留 self.connection 物件參照，
-            不設為 None。
-
-            這樣可以讓測試及其他生命週期
-            管理程式確認 close() 是否被呼叫。
         """
 
         try:
@@ -2422,3 +2007,8 @@ class ArticleRepository:
                 "ArticleRepository close failed: "
                 f"{e}"
             )
+
+
+__all__ = [
+    "ArticleRepository",
+]

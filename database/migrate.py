@@ -73,7 +73,21 @@ MIGRATION_FILES = [
     # P2.2.2 Archive Version History
     "database/migration_v4_p2_2_2.sql",
     
-    "database/migration_v4_p2_4_1.sql"
+    "database/migration_v4_p2_4_1.sql",
+
+    # ======================================
+    # V5.1 P1.2
+    # User Target
+    # ======================================
+
+    "database/migration_v5_p1_2.sql",
+    
+    # ======================================
+    # V5.4 P4.2
+    # Job Repository
+    # ======================================
+
+    "database/migration_v5_p4_2.sql"
 
 ]
 
