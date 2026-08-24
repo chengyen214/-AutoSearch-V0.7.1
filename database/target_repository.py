@@ -720,6 +720,78 @@ class TargetRepository:
             self._to_model(row)
             for row in results
         ]
+    # ==================================
+    # Find By Status
+    # ==================================
+
+    def find_by_status(
+        self,
+        status
+    ):
+        """
+        依 Target Status 查詢 Target。
+
+        例如：
+
+            active
+            inactive
+            completed
+
+        Repository 只負責：
+
+            Database Query
+
+        不負責：
+
+            Status Business Validation
+        """
+
+        if not status:
+
+            return []
+
+        status = str(
+            status
+        ).strip()
+
+        if not status:
+
+            return []
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM targets
+                WHERE status=%s
+                ORDER BY id DESC
+                """,
+                (
+                    status,
+                )
+            )
+
+            results = cursor.fetchall()
+
+        finally:
+
+            cursor.close()
+            conn.close()
+
+        return [
+            self._to_model(row)
+            for row in results
+        ]
+
+
+
 
     # ==================================
     # Find By Type

@@ -1,7 +1,7 @@
 """
 api/main.py
 
-AutoSearch V4
+AutoSearch V4 / V5
 
 FastAPI API + Web UI Layer
 
@@ -77,6 +77,9 @@ V4 P3:
     P3.10:
         System / Health API
 
+V5:
+    Target Management API
+
 
 Web UI:
 
@@ -101,14 +104,17 @@ Run:
 """
 
 
+# ==================================================
+# Imports
+# ==================================================
+
 from fastapi import (
     FastAPI,
-    Request
+    Request,
 )
 
-
 from fastapi.templating import (
-    Jinja2Templates
+    Jinja2Templates,
 )
 
 
@@ -117,9 +123,7 @@ from fastapi.templating import (
 # ==================================================
 
 templates = Jinja2Templates(
-
     directory="templates"
-
 )
 
 
@@ -136,13 +140,13 @@ tags_metadata = [
     {
         "name": "Article API",
         "description":
-            "文章資料與 Article API"
+            "文章資料與 Article API",
     },
 
     {
         "name": "AI Analysis",
         "description":
-            "AI Analysis 查詢與分析結果 API"
+            "AI Analysis 查詢與分析結果 API",
     },
 
 
@@ -153,31 +157,31 @@ tags_metadata = [
     {
         "name": "Knowledge API",
         "description":
-            "Knowledge Archive / Knowledge Retrieval API"
+            "Knowledge Archive / Knowledge Retrieval API",
     },
 
     {
         "name": "Knowledge Ranking",
         "description":
-            "Knowledge Ranking 與 Knowledge Score Filter API"
+            "Knowledge Ranking 與 Knowledge Score Filter API",
     },
 
     {
         "name": "Knowledge Score",
         "description":
-            "Knowledge Score 管理與查詢 API"
+            "Knowledge Score 管理與查詢 API",
     },
 
     {
         "name": "Intelligence API",
         "description":
-            "Knowledge Intelligence Service API"
+            "Knowledge Intelligence Service API",
     },
 
     {
         "name": "Search API",
         "description":
-            "Keyword / Entity / Hybrid / Ranked Search API"
+            "Keyword / Entity / Hybrid / Ranked Search API",
     },
 
 
@@ -188,25 +192,25 @@ tags_metadata = [
     {
         "name": "Search Index",
         "description":
-            "Search Index 建立、更新與查詢 API"
+            "Search Index 建立、更新與查詢 API",
     },
 
     {
         "name": "Archive",
         "description":
-            "Knowledge Archive API 與 Web UI"
+            "Knowledge Archive API 與 Web UI",
     },
 
     {
         "name": "Archive Management",
         "description":
-            "Knowledge Archive Management API"
+            "Knowledge Archive Management API",
     },
 
     {
         "name": "Historical Search",
         "description":
-            "Knowledge Archive Historical Search API"
+            "Knowledge Archive Historical Search API",
     },
 
 
@@ -217,32 +221,43 @@ tags_metadata = [
     {
         "name": "Article Management",
         "description":
-            "Article Management API"
+            "Article Management API",
     },
 
     {
         "name": "Article Version",
         "description":
-            "Article Version 與 Version History API"
+            "Article Version 與 Version History API",
     },
 
     {
         "name": "AI Task Management",
         "description":
-            "AI Task Queue、Pending Task 與 AI Task Management API"
+            "AI Task Queue、Pending Task 與 AI Task Management API",
     },
 
     {
         "name": "Ranking API",
         "description":
-            "Search Ranking、Score Calculator 與 Final Search Score API"
+            "Search Ranking、Score Calculator 與 Final Search Score API",
     },
 
     {
         "name": "System",
         "description":
-            "System Status、Health Check 與 Version API"
-    }
+            "System Status、Health Check 與 Version API",
+    },
+
+
+    # ----------------------------------
+    # V5
+    # ----------------------------------
+
+    {
+        "name": "Target Management",
+        "description":
+            "Target 建立、查詢、刪除與狀態管理 API",
+    },
 
 ]
 
@@ -256,6 +271,8 @@ from api.routes import (
     articles,
 
     ai_analysis,
+
+    targets,
 
     knowledge,
 
@@ -283,7 +300,7 @@ from api.routes import (
 
     ranking,
 
-    system
+    system,
 
 )
 
@@ -304,7 +321,7 @@ app = FastAPI(
         "Management and Intelligence API"
     ),
 
-    openapi_tags=tags_metadata
+    openapi_tags=tags_metadata,
 
 )
 
@@ -314,16 +331,11 @@ app = FastAPI(
 # ==================================================
 
 @app.get(
-
     "/",
-
-    include_in_schema=False
-
+    include_in_schema=False,
 )
 def dashboard(
-
-    request: Request
-
+    request: Request,
 ):
     """
     AutoSearch V4 Web Dashboard。
@@ -341,9 +353,48 @@ def dashboard(
                 "AutoSearch V4",
 
             "version":
-                "4.0"
+                "4.0",
 
-        }
+        },
+
+    )
+
+
+# ==================================================
+# Target Management Web UI
+# ==================================================
+
+@app.get(
+    "/targets/ui",
+    include_in_schema=False,
+)
+def targets_ui(
+    request: Request,
+):
+    """
+    AutoSearch V5
+
+    Target Management Web UI。
+    """
+
+    return templates.TemplateResponse(
+
+        request=request,
+
+        name="targets/index.html",
+
+        context={
+
+            "project":
+                "AutoSearch V5",
+
+            "version":
+                "5.0",
+
+            "page":
+                "Target Management",
+
+        },
 
     )
 
@@ -353,16 +404,11 @@ def dashboard(
 # ==================================================
 
 @app.get(
-
     "/archive/ui",
-
-    include_in_schema=False
-
+    include_in_schema=False,
 )
 def archive_ui(
-
-    request: Request
-
+    request: Request,
 ):
     """
     AutoSearch V4
@@ -385,9 +431,9 @@ def archive_ui(
                 "4.0",
 
             "page":
-                "Knowledge Archive"
+                "Knowledge Archive",
 
-        }
+        },
 
     )
 
@@ -397,16 +443,11 @@ def archive_ui(
 # ==================================================
 
 @app.get(
-
     "/archive/search",
-
-    include_in_schema=False
-
+    include_in_schema=False,
 )
 def archive_search_page(
-
-    request: Request
-
+    request: Request,
 ):
     """
     AutoSearch V4
@@ -431,9 +472,9 @@ def archive_search_page(
                 "4.0",
 
             "page":
-                "Composite Archive Search"
+                "Composite Archive Search",
 
-        }
+        },
 
     )
 
@@ -443,15 +484,10 @@ def archive_search_page(
 # ==================================================
 
 @app.get(
-
     "/api",
-
     tags=[
-
-        "System"
-
-    ]
-
+        "System",
+    ],
 )
 def api_root():
     """
@@ -467,7 +503,7 @@ def api_root():
             "4.0",
 
         "stage":
-            "P3.10",
+            "P3.10 + V5 Target Management",
 
         "status":
             "running",
@@ -535,7 +571,14 @@ def api_root():
 
             "Ranking API",
 
-            "System / Health API"
+            "System / Health API",
+
+
+            # ------------------------------
+            # V5
+            # ------------------------------
+
+            "Target Management",
 
         ],
 
@@ -581,9 +624,12 @@ def api_root():
                 "/ranking",
 
             "system":
-                "/system"
+                "/system",
 
-        }
+            "targets":
+                "/targets",
+
+        },
 
     }
 
@@ -599,9 +645,7 @@ def api_root():
 # ==================================================
 
 app.include_router(
-
     articles.router
-
 )
 
 
@@ -611,9 +655,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     ai_analysis.router
-
 )
 
 
@@ -623,9 +665,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     knowledge.router
-
 )
 
 
@@ -635,9 +675,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     knowledge_ranking.router
-
 )
 
 
@@ -647,9 +685,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     intelligence.router
-
 )
 
 
@@ -659,9 +695,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     intelligent_search.router
-
 )
 
 
@@ -671,9 +705,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     semantic_search.router
-
 )
 
 
@@ -683,9 +715,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     hybrid_search.router
-
 )
 
 
@@ -695,9 +725,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     search_index.router
-
 )
 
 
@@ -707,9 +735,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     archive.router
-
 )
 
 
@@ -719,9 +745,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     archive_management.router
-
 )
 
 
@@ -731,9 +755,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     historical_search.router
-
 )
 
 
@@ -743,9 +765,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     ai_tasks.router
-
 )
 
 
@@ -796,9 +816,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     search.router
-
 )
 
 
@@ -808,9 +826,7 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     ranking.router
-
 )
 
 
@@ -820,7 +836,15 @@ app.include_router(
 # ==================================================
 
 app.include_router(
-
     system.router
+)
 
+
+# ==================================================
+# V5
+# Target Management API
+# ==================================================
+
+app.include_router(
+    targets.router
 )

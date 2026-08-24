@@ -41,16 +41,20 @@ Target Service
     - Get Target By Search
     - Find All
     - Find Active
+    - Find By Status
     - Find By Type
     - Find URL Targets
     - Find Search Targets
     - Update Target
+    - Update Target Status
     - Enable Target
     - Disable Target
     - Delete Target
     - Target Exists
     - Target Duplicate Check
     - Target Count
+    - Target Count By Status
+    - Target Count By Type
 
 
 不負責：
@@ -122,10 +126,6 @@ class TargetService:
     ):
         """
         建立 TargetService。
-
-        若未注入 Validator：
-
-            預設使用 TargetValidator。
 
         支援 Dependency Injection：
 
@@ -216,8 +216,10 @@ class TargetService:
 
         target = Target(
             name=name,
-            target_type="url",
+            target_type=Target.TYPE_URL,
             url=url,
+            keyword="",
+            search_provider="",
             description=description,
             status=status,
         )
@@ -241,13 +243,6 @@ class TargetService:
         """
         建立 Search Target。
 
-        Example：
-
-            service.create_search_target(
-                keyword="semiconductor",
-                search_provider="google_search",
-            )
-
         注意：
 
             keyword=None 必須保留其語意，
@@ -259,10 +254,6 @@ class TargetService:
                 ""
                     → keyword cannot be empty
         """
-
-        # ----------------------------------------------
-        # Preserve None semantics
-        # ----------------------------------------------
 
         if keyword is None:
 
@@ -278,7 +269,7 @@ class TargetService:
 
         target = Target(
             name=name,
-            target_type="search",
+            target_type=Target.TYPE_SEARCH,
             url="",
             keyword=keyword,
             search_provider=search_provider,
@@ -307,7 +298,7 @@ class TargetService:
 
         return self.create_search_target(
             keyword=keyword,
-            search_provider="google_search",
+            search_provider=Target.PROVIDER_GOOGLE_SEARCH,
             name=name,
             description=description,
             status=status,
@@ -330,7 +321,7 @@ class TargetService:
 
         return self.create_search_target(
             keyword=keyword,
-            search_provider="google_news",
+            search_provider=Target.PROVIDER_GOOGLE_NEWS,
             name=name,
             description=description,
             status=status,
@@ -363,17 +354,13 @@ class TargetService:
         """
         依 URL 取得 Target。
 
-        查詢前先進行 URL Canonicalization，
-        確保：
-
-            https://example.com
-            https://example.com/
-
-        視為相同 URL。
+        查詢前先進行 URL Canonicalization。
         """
 
-        normalized_url = self._normalize_url_lookup(
-            url
+        normalized_url = (
+            self._normalize_url_lookup(
+                url
+            )
         )
 
         return self.repository.get_by_url(
@@ -442,6 +429,34 @@ class TargetService:
         return self.repository.find_active()
 
     # ==================================================
+    # Find By Status
+    # ==================================================
+
+    def find_by_status(
+        self,
+        status,
+    ):
+        """
+        依 Status 查詢 Target。
+
+        例如：
+
+            active
+            inactive
+            completed
+
+        主要提供：
+
+            Target View
+            Target API
+            Status Filter
+        """
+
+        return self.repository.find_by_status(
+            status
+        )
+
+    # ==================================================
     # Find By Type
     # ==================================================
 
@@ -507,6 +522,10 @@ class TargetService:
             Duplicate Check
                 ↓
             Repository.update()
+                ↓
+            Repository.get_by_id()
+                ↓
+            Updated Target
         """
 
         if not isinstance(
@@ -534,8 +553,41 @@ class TargetService:
             target
         )
 
-        return self.repository.update(
+        updated = self.repository.update(
             target
+        )
+
+        if not updated:
+            return None
+
+        return self.repository.get_by_id(
+            target.id
+        )
+
+    
+
+    # ==================================================
+    # Update Status
+    # ==================================================
+
+    def update_status(
+        self,
+        target_id,
+        status,
+    ):
+        """
+        更新 Target Status。
+
+        例如：
+
+            active
+            inactive
+            completed
+        """
+
+        return self.repository.update_status(
+            target_id=target_id,
+            status=status,
         )
 
     # ==================================================
@@ -616,8 +668,10 @@ class TargetService:
         查詢前進行 URL Canonicalization。
         """
 
-        normalized_url = self._normalize_url_lookup(
-            url
+        normalized_url = (
+            self._normalize_url_lookup(
+                url
+            )
         )
 
         return self.repository.exists_by_url(
@@ -654,9 +708,11 @@ class TargetService:
         Create 時的 Duplicate Check。
 
         URL Target：
+
             URL
 
         Search Target：
+
             Keyword + Search Provider
         """
 
@@ -697,8 +753,10 @@ class TargetService:
 
         if target.target_type == Target.TYPE_URL:
 
-            existing = self.repository.get_by_url(
-                target.url
+            existing = (
+                self.repository.get_by_url(
+                    target.url
+                )
             )
 
             if (
@@ -712,9 +770,11 @@ class TargetService:
 
         elif target.target_type == Target.TYPE_SEARCH:
 
-            existing = self.repository.get_by_search(
-                target.keyword,
-                target.search_provider,
+            existing = (
+                self.repository.get_by_search(
+                    target.keyword,
+                    target.search_provider,
+                )
             )
 
             if (
@@ -736,12 +796,6 @@ class TargetService:
     ):
         """
         呼叫 Validator Normalize。
-
-        TargetValidator 預設會被注入，
-        因此正式 Create / Update 一定會：
-
-            Normalize
-            Validate
         """
 
         if self.validator is None:
@@ -799,7 +853,7 @@ class TargetService:
             不修改 fragment。
             不修改 path 中間的 slash。
 
-        僅移除 URL 最尾端的 slash。
+            僅移除 URL 最尾端的 slash。
         """
 
         if url is None:
@@ -816,8 +870,6 @@ class TargetService:
             url
         )
 
-        # 只有合法 http / https URL 才做 canonicalization。
-        # 非法 URL 交由 Validator 處理。
         if parsed.scheme not in {
             "http",
             "https",
@@ -825,13 +877,6 @@ class TargetService:
 
             return url
 
-        # Root URL：
-        #
-        # https://example.com/
-        #
-        # ↓
-        #
-        # https://example.com
         if parsed.path in {
             "",
             "/",

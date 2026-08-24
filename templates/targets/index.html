@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+
+<html lang="zh-TW">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>
+    AutoSearch V5 - Target Management
+</title>
+
+<style>
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+
+        margin: 0;
+
+        font-family:
+            Arial,
+            "Microsoft JhengHei",
+            sans-serif;
+
+        background: #f5f7fa;
+
+        color: #1f2937;
+    }
+
+
+    /* ==================================================
+       Header
+       ================================================== */
+
+    .header {
+
+        background: #1f2937;
+
+        color: white;
+
+        padding: 30px 40px;
+    }
+
+    .header h1 {
+
+        margin: 0;
+
+        font-size: 32px;
+    }
+
+    .header p {
+
+        margin: 8px 0 0;
+
+        color: #d1d5db;
+    }
+
+
+    /* ==================================================
+       Container
+       ================================================== */
+
+    .container {
+
+        max-width: 1200px;
+
+        margin: 0 auto;
+
+        padding: 40px 20px;
+    }
+
+
+    /* ==================================================
+       Section
+       ================================================== */
+
+    .section {
+
+        margin-bottom: 35px;
+    }
+
+    .section h2 {
+
+        margin-bottom: 20px;
+    }
+
+
+    /* ==================================================
+       Card
+       ================================================== */
+
+    .card {
+
+        background: white;
+
+        padding: 30px;
+
+        border-radius: 10px;
+
+        box-shadow:
+            0 2px 8px
+            rgba(
+                0,
+                0,
+                0,
+                0.08
+            );
+    }
+
+
+    /* ==================================================
+       Form
+       ================================================== */
+
+    .form-grid {
+
+        display: grid;
+
+        grid-template-columns:
+            repeat(2, 1fr);
+
+        gap: 20px;
+    }
+
+    .form-group {
+
+        display: flex;
+
+        flex-direction: column;
+
+        gap: 8px;
+    }
+
+    .form-group.full {
+
+        grid-column: 1 / -1;
+    }
+
+    label {
+
+        font-weight: bold;
+
+        color: #374151;
+    }
+
+    input,
+    select,
+    textarea {
+
+        width: 100%;
+
+        padding: 11px 12px;
+
+        border:
+            1px solid #d1d5db;
+
+        border-radius: 6px;
+
+        font-size: 15px;
+
+        font-family: inherit;
+
+        background: white;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+
+        outline: none;
+
+        border-color: #2563eb;
+
+        box-shadow:
+            0 0 0 2px
+            rgba(
+                37,
+                99,
+                235,
+                0.12
+            );
+    }
+
+    textarea {
+
+        min-height: 90px;
+
+        resize: vertical;
+    }
+
+
+    /* ==================================================
+       Buttons
+       ================================================== */
+
+    .button-row {
+
+        margin-top: 20px;
+
+        display: flex;
+
+        gap: 10px;
+
+        flex-wrap: wrap;
+    }
+
+    button {
+
+        border: none;
+
+        border-radius: 6px;
+
+        padding: 11px 18px;
+
+        font-size: 15px;
+
+        font-family: inherit;
+
+        cursor: pointer;
+    }
+
+    .button-primary {
+
+        background: #2563eb;
+
+        color: white;
+    }
+
+    .button-primary:hover {
+
+        background: #1d4ed8;
+    }
+
+    .button-danger {
+
+        background: #dc2626;
+
+        color: white;
+    }
+
+    .button-danger:hover {
+
+        background: #b91c1c;
+    }
+
+    .button-secondary {
+
+        background: #6b7280;
+
+        color: white;
+    }
+
+    .button-secondary:hover {
+
+        background: #4b5563;
+    }
+
+    button:disabled {
+
+        opacity: 0.5;
+
+        cursor: not-allowed;
+    }
+
+
+    /* ==================================================
+       Target List Header
+       ================================================== */
+
+    .toolbar {
+
+        display: flex;
+
+        justify-content: space-between;
+
+        align-items: center;
+
+        gap: 15px;
+
+        margin-bottom: 20px;
+
+        flex-wrap: wrap;
+    }
+
+    .toolbar-left {
+
+        display: flex;
+
+        align-items: center;
+
+        gap: 10px;
+    }
+
+    .toolbar-right {
+
+        display: flex;
+
+        align-items: center;
+
+        gap: 10px;
+    }
+
+    .target-count {
+
+        color: #6b7280;
+
+        font-size: 14px;
+    }
+
+
+    /* ==================================================
+       Table
+       ================================================== */
+
+    .table-wrapper {
+
+        overflow-x: auto;
+    }
+
+    table {
+
+        width: 100%;
+
+        border-collapse: collapse;
+
+        min-width: 900px;
+    }
+
+    th,
+    td {
+
+        padding: 13px 12px;
+
+        border-bottom:
+            1px solid #e5e7eb;
+
+        text-align: left;
+
+        vertical-align: middle;
+    }
+
+    th {
+
+        background: #f9fafb;
+
+        font-weight: bold;
+
+        color: #374151;
+    }
+
+    tbody tr:hover {
+
+        background: #f9fafb;
+    }
+
+    .checkbox-cell {
+
+        width: 45px;
+
+        text-align: center;
+    }
+
+    input[type="checkbox"] {
+
+        width: auto;
+
+        cursor: pointer;
+    }
+
+
+    /* ==================================================
+       Status
+       ================================================== */
+
+    .status {
+
+        display: inline-block;
+
+        padding: 4px 9px;
+
+        border-radius: 999px;
+
+        font-size: 13px;
+
+        font-weight: bold;
+    }
+
+    .status-active {
+
+        background: #dcfce7;
+
+        color: #166534;
+    }
+
+    .status-inactive {
+
+        background: #f3f4f6;
+
+        color: #4b5563;
+    }
+
+    .status-completed {
+
+        background: #dbeafe;
+
+        color: #1e40af;
+    }
+
+    .status-unknown {
+
+        background: #fee2e2;
+
+        color: #991b1b;
+    }
+
+
+    /* ==================================================
+       Empty
+       ================================================== */
+
+    .empty {
+
+        padding: 40px 20px;
+
+        text-align: center;
+
+        color: #6b7280;
+    }
+
+
+    /* ==================================================
+       Message
+       ================================================== */
+
+    .message {
+
+        display: none;
+
+        margin-bottom: 20px;
+
+        padding: 12px 15px;
+
+        border-radius: 6px;
+
+        font-size: 14px;
+    }
+
+    .message.success {
+
+        display: block;
+
+        background: #dcfce7;
+
+        color: #166534;
+    }
+
+    .message.error {
+
+        display: block;
+
+        background: #fee2e2;
+
+        color: #991b1b;
+    }
+
+
+    /* ==================================================
+       Footer
+       ================================================== */
+
+    .footer {
+
+        margin-top: 50px;
+
+        padding-top: 20px;
+
+        border-top:
+            1px solid #e5e7eb;
+
+        color: #6b7280;
+
+        text-align: center;
+    }
+
+
+    /* ==================================================
+       Responsive
+       ================================================== */
+
+    @media (
+        max-width: 768px
+    ) {
+
+        .header {
+
+            padding: 25px 20px;
+        }
+
+        .container {
+
+            padding: 25px 15px;
+        }
+
+        .form-grid {
+
+            grid-template-columns:
+                1fr;
+        }
+
+        .form-group.full {
+
+            grid-column: auto;
+        }
+
+    }
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!-- ==================================================
+     Header
+     ================================================== -->
+
+<header class="header">
+
+    <h1>
+        AutoSearch V5
+    </h1>
+
+    <p>
+        Target Management
+    </p>
+
+</header>
+
+
+<div class="container">
+
+
+<!-- ==================================================
+     Message
+     ================================================== -->
+
+<div
+    id="message"
+    class="message"
+></div>
+
+
+<!-- ==================================================
+     Create Target
+     ================================================== -->
+
+<section class="section">
+
+    <h2>
+        Create Target
+    </h2>
+
+    <div class="card">
+
+        <form id="target-form">
+
+            <div class="form-grid">
+
+
+                <!-- ==================================
+                     Name
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="name">
+                        Target Name
+                    </label>
+
+                    <input
+                        id="name"
+                        name="name"
+                        type="text"
+                        placeholder="例如：TSMC"
+                    >
+
+                </div>
+
+
+                <!-- ==================================
+                     Target Type
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="target_type">
+                        Target Type
+                    </label>
+
+                    <select
+                        id="target_type"
+                        name="target_type"
+                    >
+
+                        <option
+                            value="url"
+                        >
+                            Direct URL
+                        </option>
+
+                        <option
+                            value="search"
+                        >
+                            Keyword Search
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <!-- ==================================
+                     URL
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="url">
+                        URL
+                    </label>
+
+                    <input
+                        id="url"
+                        name="url"
+                        type="url"
+                        placeholder="https://www.example.com/"
+                    >
+
+                </div>
+
+
+                <!-- ==================================
+                     Keyword
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="keyword">
+                        Keyword
+                    </label>
+
+                    <input
+                        id="keyword"
+                        name="keyword"
+                        type="text"
+                        placeholder="例如：IC semiconductor"
+                    >
+
+                </div>
+
+
+                <!-- ==================================
+                     Search Provider
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="search_provider">
+                        Search Provider
+                    </label>
+
+                    <select
+                        id="search_provider"
+                        name="search_provider"
+                    >
+
+                        <option
+                            value=""
+                        >
+                            Select Provider
+                        </option>
+
+                        <option
+                            value="google_search"
+                        >
+                            Google Search
+                        </option>
+
+                        <option
+                            value="google_news"
+                        >
+                            Google News
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <!-- ==================================
+                     Description
+                     ================================== -->
+
+                <div class="form-group">
+
+                    <label for="description">
+                        Description
+                    </label>
+
+                    <input
+                        id="description"
+                        name="description"
+                        type="text"
+                        placeholder="Target description"
+                    >
+
+                </div>
+
+
+            </div>
+
+
+            <!-- ======================================
+                 Buttons
+                 ====================================== -->
+
+            <div class="button-row">
+
+                <button
+                    type="submit"
+                    class="button-primary"
+                >
+                    Create Target
+                </button>
+
+                <button
+                    type="reset"
+                    class="button-secondary"
+                >
+                    Reset
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</section>
+
+
+<!-- ==================================================
+     Current Targets
+     ================================================== -->
+
+<section class="section">
+
+    <h2>
+        Current Targets
+    </h2>
+
+    <div class="card">
+
+
+        <!-- ==========================================
+             Toolbar
+             ========================================== -->
+
+        <div class="toolbar">
+
+
+            <div class="toolbar-left">
+
+                <label
+                    for="status-filter"
+                >
+                    Status
+                </label>
+
+                <select
+                    id="status-filter"
+                >
+
+                    <option value="all">
+                        All
+                    </option>
+
+                    <option value="active">
+                        Active
+                    </option>
+
+                    <option value="inactive">
+                        Inactive
+                    </option>
+
+                    <option value="completed">
+                        Completed
+                    </option>
+
+                </select>
+
+                <span
+                    id="target-count"
+                    class="target-count"
+                >
+                    0 Targets
+                </span>
+
+            </div>
+
+
+            <div class="toolbar-right">
+
+                <button
+                    type="button"
+                    id="delete-selected"
+                    class="button-danger"
+                    disabled
+                >
+                    Delete Selected
+                </button>
+
+                <button
+                    type="button"
+                    id="refresh-targets"
+                    class="button-secondary"
+                >
+                    Refresh
+                </button>
+
+            </div>
+
+
+        </div>
+
+
+        <!-- ==========================================
+             Table
+             ========================================== -->
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th class="checkbox-cell">
+
+                            <input
+                                type="checkbox"
+                                id="select-all"
+                            >
+
+                        </th>
+
+                        <th>
+                            ID
+                        </th>
+
+                        <th>
+                            Name
+                        </th>
+
+                        <th>
+                            Type
+                        </th>
+
+                        <th>
+                            URL
+                        </th>
+
+                        <th>
+                            Keyword
+                        </th>
+
+                        <th>
+                            Provider
+                        </th>
+
+                        <th>
+                            Status
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody
+                    id="targets-body"
+                >
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+
+        <!-- ==========================================
+             Empty
+             ========================================== -->
+
+        <div
+            id="empty-targets"
+            class="empty"
+            style="display: none;"
+        >
+            No targets found.
+        </div>
+
+
+    </div>
+
+</section>
+
+
+<!-- ==================================================
+     Footer
+     ================================================== -->
+
+<footer class="footer">
+
+    AutoSearch V5 · Target Management
+
+</footer>
+
+
+</div>
+
+
+<!-- ==================================================
+     JavaScript
+     ================================================== -->
+
+<script>
+
+    const API_BASE = "/targets";
+
+
+    /* ==================================================
+       Elements
+       ================================================== */
+
+    const form =
+        document.getElementById(
+            "target-form"
+        );
+
+    const targetType =
+        document.getElementById(
+            "target_type"
+        );
+
+    const urlInput =
+        document.getElementById(
+            "url"
+        );
+
+    const keywordInput =
+        document.getElementById(
+            "keyword"
+        );
+
+    const providerInput =
+        document.getElementById(
+            "search_provider"
+        );
+
+    const statusFilter =
+        document.getElementById(
+            "status-filter"
+        );
+
+    const targetsBody =
+        document.getElementById(
+            "targets-body"
+        );
+
+    const emptyTargets =
+        document.getElementById(
+            "empty-targets"
+        );
+
+    const targetCount =
+        document.getElementById(
+            "target-count"
+        );
+
+    const selectAll =
+        document.getElementById(
+            "select-all"
+        );
+
+    const deleteSelected =
+        document.getElementById(
+            "delete-selected"
+        );
+
+    const refreshTargets =
+        document.getElementById(
+            "refresh-targets"
+        );
+
+    const message =
+        document.getElementById(
+            "message"
+        );
+
+
+    /* ==================================================
+       Message
+       ================================================== */
+
+    function showMessage(
+        text,
+        type
+    ) {
+
+        message.textContent =
+            text;
+
+        message.className =
+            "message " + type;
+
+    }
+
+
+    function clearMessage() {
+
+        message.textContent = "";
+
+        message.className =
+            "message";
+
+    }
+
+
+    /* ==================================================
+       Target Type UI
+       ================================================== */
+
+    function updateFormFields() {
+
+        const type =
+            targetType.value;
+
+        if (
+            type === "url"
+        ) {
+
+            keywordInput.disabled =
+                false;
+
+            providerInput.disabled =
+                true;
+
+            providerInput.value =
+                "";
+
+        } else {
+
+            keywordInput.disabled =
+                false;
+
+            providerInput.disabled =
+                false;
+
+        }
+
+    }
+
+
+    targetType.addEventListener(
+        "change",
+        updateFormFields
+    );
+
+
+    /* ==================================================
+       Create Target
+       ================================================== */
+
+    form.addEventListener(
+        "submit",
+        async function(event) {
+
+            event.preventDefault();
+
+            clearMessage();
+
+            const payload = {
+
+                name:
+                    document
+                        .getElementById(
+                            "name"
+                        )
+                        .value
+                        .trim(),
+
+                target_type:
+                    targetType.value,
+
+                url:
+                    urlInput.value
+                        .trim(),
+
+                keyword:
+                    keywordInput.value
+                        .trim(),
+
+                search_provider:
+                    providerInput.value
+                        .trim(),
+
+                description:
+                    document
+                        .getElementById(
+                            "description"
+                        )
+                        .value
+                        .trim(),
+
+            };
+
+
+            try {
+
+                const response =
+                    await fetch(
+                        API_BASE,
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json",
+                            },
+
+                            body:
+                                JSON.stringify(
+                                    payload
+                                ),
+                        }
+                    );
+
+
+                const data =
+                    await response.json();
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        data.detail ||
+                        "Failed to create target."
+                    );
+
+                }
+
+
+                showMessage(
+                    "Target created successfully.",
+                    "success"
+                );
+
+
+                form.reset();
+
+                updateFormFields();
+
+                await loadTargets();
+
+            }
+            catch (error) {
+
+                showMessage(
+                    error.message,
+                    "error"
+                );
+
+            }
+
+        }
+    );
+
+
+    /* ==================================================
+       Load Targets
+       ================================================== */
+
+    async function loadTargets() {
+
+        try {
+
+            const response =
+                await fetch(
+                    API_BASE
+                );
+
+
+            const data =
+                await response.json();
+
+
+            if (
+                !response.ok
+            ) {
+
+                throw new Error(
+                    data.detail ||
+                    "Failed to load targets."
+                );
+
+            }
+
+
+            renderTargets(
+                data.targets || []
+            );
+
+        }
+        catch (error) {
+
+            showMessage(
+                error.message,
+                "error"
+            );
+
+        }
+
+    }
+
+
+    /* ==================================================
+       Render Targets
+       ================================================== */
+
+    function renderTargets(
+        targets
+    ) {
+
+        const filter =
+            statusFilter.value;
+
+
+        const filteredTargets =
+            targets.filter(
+                function(target) {
+
+                    if (
+                        filter === "all"
+                    ) {
+
+                        return true;
+
+                    }
+
+                    return (
+                        target.status ===
+                        filter
+                    );
+
+                }
+            );
+
+
+        targetsBody.innerHTML =
+            "";
+
+
+        targetCount.textContent =
+            filteredTargets.length +
+            " Targets";
+
+
+        if (
+            filteredTargets.length === 0
+        ) {
+
+            emptyTargets.style.display =
+                "block";
+
+            selectAll.checked =
+                false;
+
+            updateDeleteButton();
+
+            return;
+
+        }
+
+
+        emptyTargets.style.display =
+            "none";
+
+
+        filteredTargets.forEach(
+            function(target) {
+
+                const row =
+                    document.createElement(
+                        "tr"
+                    );
+
+
+                row.innerHTML = `
+
+                    <td class="checkbox-cell">
+
+                        <input
+                            type="checkbox"
+                            class="target-checkbox"
+                            value="${escapeHtml(
+                                String(
+                                    target.id
+                                )
+                            )}"
+                        >
+
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            String(
+                                target.id
+                            )
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            target.name || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            target.target_type || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            target.url || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            target.keyword || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            target.search_provider || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${renderStatus(
+                            target.status
+                        )}
+                    </td>
+
+                `;
+
+
+                targetsBody.appendChild(
+                    row
+                );
+
+            }
+        );
+
+
+        bindCheckboxEvents();
+
+        selectAll.checked =
+            false;
+
+        updateDeleteButton();
+
+    }
+
+
+    /* ==================================================
+       Status
+       ================================================== */
+
+    function renderStatus(
+        status
+    ) {
+
+        const value =
+            status || "unknown";
+
+
+        let className =
+            "status-unknown";
+
+
+        if (
+            value === "active"
+        ) {
+
+            className =
+                "status-active";
+
+        }
+        else if (
+            value === "inactive"
+        ) {
+
+            className =
+                "status-inactive";
+
+        }
+        else if (
+            value === "completed"
+        ) {
+
+            className =
+                "status-completed";
+
+        }
+
+
+        return `
+
+            <span
+                class="status ${className}"
+            >
+                ${escapeHtml(value)}
+            </span>
+
+        `;
+
+    }
+
+
+    /* ==================================================
+       Checkbox
+       ================================================== */
+
+    function bindCheckboxEvents() {
+
+        const checkboxes =
+            document.querySelectorAll(
+                ".target-checkbox"
+            );
+
+
+        checkboxes.forEach(
+            function(checkbox) {
+
+                checkbox.addEventListener(
+                    "change",
+                    updateDeleteButton
+                );
+
+            }
+        );
+
+    }
+
+
+    selectAll.addEventListener(
+        "change",
+        function() {
+
+            const checkboxes =
+                document.querySelectorAll(
+                    ".target-checkbox"
+                );
+
+
+            checkboxes.forEach(
+                function(checkbox) {
+
+                    checkbox.checked =
+                        selectAll.checked;
+
+                }
+            );
+
+
+            updateDeleteButton();
+
+        }
+    );
+
+
+    function updateDeleteButton() {
+
+        const selected =
+            document.querySelectorAll(
+                ".target-checkbox:checked"
+            );
+
+
+        deleteSelected.disabled =
+            selected.length === 0;
+
+    }
+
+
+    /* ==================================================
+       Delete Selected
+       ================================================== */
+
+    deleteSelected.addEventListener(
+        "click",
+        async function() {
+
+            const selected =
+                Array.from(
+                    document.querySelectorAll(
+                        ".target-checkbox:checked"
+                    )
+                ).map(
+                    function(checkbox) {
+
+                        return checkbox.value;
+
+                    }
+                );
+
+
+            if (
+                selected.length === 0
+            ) {
+
+                return;
+
+            }
+
+
+            const confirmed =
+                window.confirm(
+                    "確定要刪除選取的 " +
+                    selected.length +
+                    " 個 Target 嗎？"
+                );
+
+
+            if (
+                !confirmed
+            ) {
+
+                return;
+
+            }
+
+
+            clearMessage();
+
+
+            try {
+
+                for (
+                    const targetId
+                    of selected
+                ) {
+
+                    const response =
+                        await fetch(
+                            API_BASE +
+                            "/" +
+                            encodeURIComponent(
+                                targetId
+                            ),
+                            {
+                                method:
+                                    "DELETE",
+                            }
+                        );
+
+
+                    if (
+                        !response.ok
+                    ) {
+
+                        const data =
+                            await response
+                                .json();
+
+                        throw new Error(
+                            data.detail ||
+                            "Failed to delete target " +
+                            targetId
+                        );
+
+                    }
+
+                }
+
+
+                showMessage(
+                    selected.length +
+                    " Target(s) deleted successfully.",
+                    "success"
+                );
+
+
+                await loadTargets();
+
+            }
+            catch (error) {
+
+                showMessage(
+                    error.message,
+                    "error"
+                );
+
+                await loadTargets();
+
+            }
+
+        }
+    );
+
+
+    /* ==================================================
+       Status Filter
+       ================================================== */
+
+    statusFilter.addEventListener(
+        "change",
+        loadTargets
+    );
+
+
+    /* ==================================================
+       Refresh
+       ================================================== */
+
+    refreshTargets.addEventListener(
+        "click",
+        function() {
+
+            clearMessage();
+
+            loadTargets();
+
+        }
+    );
+
+
+    /* ==================================================
+       Escape HTML
+       ================================================== */
+
+    function escapeHtml(
+        value
+    ) {
+
+        return String(
+            value
+        )
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+
+    }
+
+
+    /* ==================================================
+       Initial Load
+       ================================================== */
+
+    updateFormFields();
+
+    loadTargets();
+
+</script>
+
+
+</body>
+
+</html>
