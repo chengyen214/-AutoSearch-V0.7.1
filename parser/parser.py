@@ -18,6 +18,22 @@ V5 Parser
 9. 建立 Article Object
 10. 建立完整文章內容 SHA-256 Hash 作為 document_id
 
+Fallback Strategy：
+
+    正常 Main Content Detection
+            ↓
+    找不到可靠正文
+            ↓
+    Largest Text Block Fallback
+            ↓
+    找頁面中「文字最多」的合理區塊
+            ↓
+    Cleaner
+            ↓
+    Extractor
+            ↓
+    Article
+
 Pipeline：
 
     Crawler
@@ -35,41 +51,6 @@ Pipeline：
     SQL
         ↓
     AI Task / Archive
-
-document_id 設計：
-
-    document_id = SHA-256(
-        完整清理後文章正文
-    )
-
-用途：
-
-    - Article Duplicate Detection
-    - Content Identity
-    - Article Version Detection
-    - 不同文章內容版本產生不同 document_id
-
-本模組負責：
-
-    - HTML Parsing
-    - HTML Noise Removal
-    - Main Content Detection
-    - Content Cleaning
-    - Article Object 建立
-    - document_id Hash 建立
-
-本模組不負責：
-
-    - Search
-    - Search Provider
-    - Search Adapter
-    - Crawler
-    - MongoDB
-    - MySQL
-    - Archive
-    - AI
-    - Job
-    - Scheduler
 """
 
 
@@ -111,7 +92,14 @@ BAD_WORDS = [
     "ad-banner",
     "ad-container",
     "ads-container",
+    "advertising",
+
+    # ----------------------------------------------
+    # Sponsor
+    # ----------------------------------------------
+
     "sponsor",
+    "sponsored",
 
     # ----------------------------------------------
     # Recommendation
@@ -119,10 +107,12 @@ BAD_WORDS = [
 
     "related-news",
     "related-article",
+    "related-content",
     "recommended",
     "recommendation",
     "more-news",
     "latest-news",
+    "you-may-like",
 
     # ----------------------------------------------
     # Social
@@ -142,6 +132,15 @@ BAD_WORDS = [
     "login",
     "register",
 
+    # ----------------------------------------------
+    # Navigation
+    # ----------------------------------------------
+
+    "breadcrumb",
+    "navigation",
+    "navbar",
+    "menu",
+
 ]
 
 
@@ -157,56 +156,10 @@ def generate_document_id(
     """
     根據完整文章正文建立 document_id。
 
-    規則：
-
-        document_id =
-            SHA-256(
-                完整清理後文章正文
-            )
-
-    注意：
-
-        Hash 的來源必須是最終文章正文，
-        而不是：
-
-            - URL
-            - Title
-            - Keyword
-            - Source
-            - Crawl Time
-            - HTML 原始內容
-
-    這樣可以讓：
-
-        相同文章內容
-            ↓
-        相同 document_id
-
-        文章內容改變
-            ↓
-        不同 document_id
-
-    用途：
-
-        - Duplicate Detection
-        - Content Identity
-        - Article Version Detection
-
-    Parameters
-    ----------
-    content :
-        最終清理完成的文章正文。
-
-    Returns
-    -------
-    str
-
-        SHA-256 hexadecimal hash。
-
-    Raises
-    ------
-    ValueError
-        content 為空。
+    document_id =
+        SHA-256(
+            完整清理後文章正文
+        )
     """
 
     if content is None:
@@ -269,16 +222,7 @@ def remove_html_noise(
 
         class / id
         中常見的廣告、推薦、社群、
-        會員區塊。
-
-    Parameters
-    ----------
-    soup :
-        BeautifulSoup instance
-
-    Returns
-    -------
-    BeautifulSoup
+        會員與導覽區塊。
     """
 
     if soup is None:
@@ -293,6 +237,7 @@ def remove_html_noise(
 
         "script",
         "style",
+        "noscript",
         "nav",
         "header",
         "footer",
@@ -309,7 +254,13 @@ def remove_html_noise(
             tag_name
         ):
 
-            tag.decompose()
+            try:
+
+                tag.decompose()
+
+            except Exception:
+
+                pass
 
     # ==================================================
     # Class / ID Noise
@@ -376,13 +327,75 @@ def remove_html_noise(
 
                 node.decompose()
 
-            except (
-                AttributeError,
-            ):
+            except AttributeError:
 
                 pass
 
     return soup
+
+
+# ==================================================
+#
+# Extract Node Text
+#
+# ==================================================
+
+def get_node_text(
+    node,
+):
+    """
+    取得候選節點的純文字。
+
+    使用統一 separator，
+    避免不同網站的 HTML 結構
+    導致文字全部黏在一起。
+    """
+
+    if node is None:
+
+        return ""
+
+    try:
+
+        text = node.get_text(
+            separator="\n",
+            strip=True,
+        )
+
+    except Exception:
+
+        return ""
+
+    if not isinstance(
+        text,
+        str,
+    ):
+
+        text = str(
+            text
+        )
+
+    return text.strip()
+
+
+# ==================================================
+#
+# Text Length
+#
+# ==================================================
+
+def text_length(
+    node,
+):
+    """
+    計算候選節點的有效文字長度。
+    """
+
+    return len(
+        get_node_text(
+            node
+        )
+    )
 
 
 # ==================================================
@@ -409,15 +422,22 @@ def content_score(
     分數越高：
 
         越可能是真正文章正文。
+
+    注意：
+
+        這不是唯一判斷方法。
+
+        如果沒有任何節點得到可靠分數，
+        find_main_content() 會進入
+        largest text block fallback。
     """
 
     if node is None:
 
         return 0
 
-    text = node.get_text(
-        separator="\n",
-        strip=True,
+    text = get_node_text(
+        node
     )
 
     if len(text) < 100:
@@ -434,6 +454,12 @@ def content_score(
 
     # ==================================================
     # Link Penalty
+    #
+    # 對 link 很多的區塊扣分。
+    #
+    # 但不直接淘汰。
+    #
+    # 某些文章正文本身可能有超連結。
     # ==================================================
 
     links = len(
@@ -441,7 +467,7 @@ def content_score(
     )
 
     link_penalty = (
-        links * 50
+        links * 35
     )
 
     # ==================================================
@@ -453,7 +479,7 @@ def content_score(
     )
 
     tag_penalty = (
-        tags * 2
+        tags * 1.5
     )
 
     # ==================================================
@@ -521,6 +547,228 @@ def content_score(
 
 # ==================================================
 #
+# Largest Text Block Fallback
+#
+# ==================================================
+
+def find_largest_text_block(
+    soup,
+):
+    """
+    找出頁面中「文字最多」的合理區塊。
+
+    這是 Parser 的重要 fallback。
+
+    當網站：
+
+        - 沒有 <article>
+        - 沒有 <main>
+        - 沒有標準 article class
+        - Content Score 無法可靠判斷
+
+    不直接放棄。
+
+    而是：
+
+        1. 搜尋 section / div / td / body
+        2. 計算每個區塊的文字長度
+        3. 避免大量 link / menu 類區塊
+        4. 選擇文字最多的合理區塊
+
+    目的：
+
+        最大化不同網站的可爬取率。
+    """
+
+    if soup is None:
+
+        return ""
+
+    candidates = []
+
+    # ==================================================
+    # Candidate Tags
+    # ==================================================
+
+    for tag_name in [
+        "article",
+        "main",
+        "section",
+        "div",
+        "td",
+    ]:
+
+        try:
+
+            nodes = soup.find_all(
+                tag_name
+            )
+
+        except Exception:
+
+            nodes = []
+
+        for node in nodes:
+
+            candidates.append(
+                node
+            )
+
+    # ==================================================
+    # Body Fallback
+    # ==================================================
+
+    if soup.body is not None:
+
+        candidates.append(
+            soup.body
+        )
+
+    # ==================================================
+    # Rank by Text Length
+    # ==================================================
+
+    best_node = None
+
+    best_length = 0
+
+    best_score = 0
+
+    seen_nodes = set()
+
+    for node in candidates:
+
+        node_id = id(
+            node
+        )
+
+        if node_id in seen_nodes:
+
+            continue
+
+        seen_nodes.add(
+            node_id
+        )
+
+        text = get_node_text(
+            node
+        )
+
+        length = len(
+            text
+        )
+
+        # ----------------------------------------------
+        # Minimum meaningful content
+        # ----------------------------------------------
+
+        if length < 200:
+
+            continue
+
+        # ----------------------------------------------
+        # Link Ratio
+        #
+        # 避免：
+        #
+        # 整個 menu
+        # 整個 link list
+        # 整個推薦區
+        #
+        # 被誤認為正文。
+        # ----------------------------------------------
+
+        links = len(
+            node.find_all("a")
+        )
+
+        words = len(
+            text.split()
+        )
+
+        if words <= 0:
+
+            continue
+
+        link_ratio = (
+            links
+            /
+            max(
+                words,
+                1,
+            )
+        )
+
+        # ----------------------------------------------
+        # Link-heavy penalty
+        # ----------------------------------------------
+
+        if link_ratio > 0.8:
+
+            continue
+
+        # ----------------------------------------------
+        # Text score
+        #
+        # 主要以文字量為核心。
+        # ----------------------------------------------
+
+        score = (
+            length
+            *
+            (
+                1
+                -
+                min(
+                    link_ratio,
+                    0.7,
+                )
+                * 0.5
+            )
+        )
+
+        # ----------------------------------------------
+        # 優先選擇文字最多
+        # ----------------------------------------------
+
+        if score > best_score:
+
+            best_score = score
+
+            best_length = length
+
+            best_node = node
+
+    # ==================================================
+    # Return
+    # ==================================================
+
+    if best_node is not None:
+
+        return get_node_text(
+            best_node
+        )
+
+    # ==================================================
+    # 最後 fallback：
+    # 整個 Body
+    # ==================================================
+
+    if soup.body is not None:
+
+        body_text = get_node_text(
+            soup.body
+        )
+
+        if len(body_text) >= 200:
+
+            return body_text
+
+    return ""
+
+
+# ==================================================
+#
 # Find Main Content
 #
 # ==================================================
@@ -532,19 +780,30 @@ def find_main_content(
     """
     找出最可能的文章正文。
 
-    Candidate 優先順序：
+    Strategy：
 
-        1. article
-        2. main
-        3. 常見新聞正文 class
-        4. div fallback
+        第一層：
+            Article / Main / 常見 Article Selector
 
-    Returns
-    -------
+        第二層：
+            Content Score
 
-    str
+        第三層：
+            Largest Text Block
 
-        文章正文。
+        第四層：
+            Body Text
+
+    因此：
+
+        如果網站結構標準
+            → 使用 Content Score
+
+        如果網站結構特殊
+            → 使用 Largest Text Block
+
+        如果網站非常特殊
+            → 使用 Body Text
     """
 
     if soup is None:
@@ -587,12 +846,31 @@ def find_main_content(
         ".article-content",
         ".article-text",
         ".article-detail",
+        ".article-detail-content",
+
         ".post-content",
+        ".post-body",
         ".entry-content",
+
         ".story-body",
         ".story-content",
+
         ".news-content",
         ".news-body",
+
+        ".content-body",
+        ".content-detail",
+        ".content-article",
+
+        ".article-main",
+        ".article-container",
+
+        "#article-content",
+        "#article-body",
+        "#article",
+
+        "#content",
+        "#main-content",
 
     ]
 
@@ -650,17 +928,37 @@ def find_main_content(
             best_node = node
 
     # ==================================================
-    # DIV Fallback
+    # DIV / SECTION Content Score
+    #
+    # 如果 article/main 不存在，
+    # 先嘗試一般內容容器。
     # ==================================================
 
     if best_node is None:
 
-        for div in soup.find_all(
-            "div"
-        ):
+        fallback_candidates = []
+
+        for tag_name in [
+            "section",
+            "div",
+        ]:
+
+            try:
+
+                fallback_candidates.extend(
+                    soup.find_all(
+                        tag_name
+                    )
+                )
+
+            except Exception:
+
+                pass
+
+        for node in fallback_candidates:
 
             score = content_score(
-                div,
+                node,
                 keyword,
             )
 
@@ -668,20 +966,63 @@ def find_main_content(
 
                 best_score = score
 
-                best_node = div
+                best_node = node
 
     # ==================================================
-    # Return Content
+    # Return Main Content
     # ==================================================
 
     if best_node is not None:
 
-        return best_node.get_text(
-            separator="\n",
-            strip=True,
+        content = get_node_text(
+            best_node
         )
 
-    return ""
+        if len(content) >= 200:
+
+            return content
+
+    # ==================================================
+    # IMPORTANT FALLBACK
+    #
+    # 找不到可靠正文時：
+    #
+    # 「不要放棄」
+    #
+    # 改找文字最多的合理區塊。
+    # ==================================================
+
+    largest_content = (
+        find_largest_text_block(
+            soup
+        )
+    )
+
+    if len(largest_content) >= 200:
+
+        return largest_content
+
+    # ==================================================
+    # Final Body Fallback
+    # ==================================================
+
+    if soup.body is not None:
+
+        body_content = get_node_text(
+            soup.body
+        )
+
+        if body_content:
+
+            return body_content
+
+    # ==================================================
+    # Final Soup Fallback
+    # ==================================================
+
+    return get_node_text(
+        soup
+    )
 
 
 # ==================================================
@@ -698,35 +1039,25 @@ def parse(
     """
     解析 HTML 並建立 Article。
 
-    Parameters
-    ----------
-    html :
-        Crawler 下載的 HTML。
+    Parser Strategy：
 
-    keyword :
-        本次搜尋 Keyword。
-
-        必須提供。
-
-    url :
-        原始 / 最終 URL。
-
-    Returns
-    -------
-
-    Article
-
-    Raises
-    ------
-
-    ValueError
-        HTML 或 Keyword 無效。
-
-    document_id：
-
-        最終文章正文經過 SHA-256
-        所產生的內容 Hash。
-
+        HTML
+          ↓
+        Remove Noise
+          ↓
+        Main Content Detection
+          ↓
+        Content Score
+          ↓
+        Largest Text Block Fallback
+          ↓
+        Body Fallback
+          ↓
+        Cleaner
+          ↓
+        Extractor
+          ↓
+        Article
     """
 
     # ==================================================
@@ -833,14 +1164,20 @@ def parse(
     )
 
     # ==================================================
-    # Fallback
+    # Emergency Fallback
+    #
+    # 理論上 find_main_content()
+    # 已經處理。
+    #
+    # 這裡再保護一次。
     # ==================================================
 
-    if len(content) < 200:
+    if not content:
 
-        content = soup.get_text(
-            separator="\n",
-            strip=True,
+        content = get_node_text(
+            soup.body
+            if soup.body is not None
+            else soup
         )
 
     # ==================================================
@@ -861,15 +1198,6 @@ def parse(
 
     # ==================================================
     # Normalize Final Content
-    #
-    # Hash 前最後一次 normalize。
-    #
-    # 確保：
-    #
-    # 相同正文
-    #     ↓
-    # 相同 document_id
-    #
     # ==================================================
 
     if content is None:
@@ -888,6 +1216,33 @@ def parse(
     content = content.strip()
 
     # ==================================================
+    # Extractor Empty Fallback
+    #
+    # 如果 Extractor 對特殊網站過度嚴格，
+    # 再回到原始選出的正文。
+    #
+    # 這是非常重要的第二層保護。
+    # ==================================================
+
+    if not content:
+
+        fallback_content = find_main_content(
+            BeautifulSoup(
+                html,
+                "html.parser",
+            ),
+            keyword,
+        )
+
+        fallback_content = clean_text(
+            fallback_content
+        )
+
+        if fallback_content:
+
+            content = fallback_content.strip()
+
+    # ==================================================
     # Validate Final Content
     # ==================================================
 
@@ -899,9 +1254,6 @@ def parse(
 
     # ==================================================
     # Generate Document ID
-    #
-    # 完整文章正文 SHA-256
-    #
     # ==================================================
 
     document_id = generate_document_id(
@@ -942,19 +1294,6 @@ def parse(
 
     article.content = content
 
-    # ==================================================
-    # Document ID
-    #
-    # 注意：
-    #
-    # 名稱維持 document_id。
-    #
-    # 實際內容：
-    #
-    #     SHA-256(article.content)
-    #
-    # ==================================================
-
     article.document_id = (
         document_id
     )
@@ -978,7 +1317,13 @@ __all__ = [
 
     "remove_html_noise",
 
+    "get_node_text",
+
+    "text_length",
+
     "content_score",
+
+    "find_largest_text_block",
 
     "find_main_content",
 
