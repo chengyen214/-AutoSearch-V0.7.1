@@ -1183,10 +1183,15 @@ class ArchiveBrowserRepository:
     # Composite Archive Search
     # ============================================================
 
+        # ============================================================
+    # Composite Archive Search
+    # ============================================================
+
     def composite_search(
         self,
         keyword=None,
         source=None,
+        url=None,
         date_from=None,
         date_to=None,
         year=None,
@@ -1206,6 +1211,7 @@ class ArchiveBrowserRepository:
 
             keyword
             source
+            url
             date_from
             date_to
             year
@@ -1214,16 +1220,29 @@ class ArchiveBrowserRepository:
             importance_min
             importance_max
 
+        URL：
+
+            Optional。
+
+            如果提供 URL，
+            只搜尋 articles.url。
+
         分頁：
 
             page
             page_size
 
-        AI 欄位來源：
+        AI 欄位：
 
+            articles.ai_summary
             articles.ai_category
+            articles.ai_keywords
             articles.ai_importance
+            articles.ai_model
+            articles.ai_version
+            articles.ai_analyze_time
             articles.ai_confidence
+            articles.ai_status
 
         不使用：
 
@@ -1331,6 +1350,28 @@ class ArchiveBrowserRepository:
 
                 values.append(
                     f"%{source}%"
+                )
+
+        # --------------------------------------------------------
+        # URL
+        # --------------------------------------------------------
+
+        if url is not None:
+
+            url = str(
+                url
+            ).strip()
+
+            if url:
+
+                conditions.append(
+                    """
+                    a.url LIKE %s
+                    """
+                )
+
+                values.append(
+                    f"%{url}%"
                 )
 
         # --------------------------------------------------------

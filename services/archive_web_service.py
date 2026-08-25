@@ -28,6 +28,7 @@ P2.4.2:
 - Advanced Filtering
 - Pagination
 - Dynamic Query Conditions
+- Optional URL Search
 
 設計：
 
@@ -445,6 +446,7 @@ class ArchiveWebService:
         self,
         keyword=None,
         source=None,
+        url=None,
         date_from=None,
         date_to=None,
         year=None,
@@ -469,6 +471,7 @@ class ArchiveWebService:
 
             keyword
             source
+            url
             date_from
             date_to
             year
@@ -482,6 +485,10 @@ class ArchiveWebService:
             page
             page_size
 
+        URL 搜尋：
+
+            url="tsmc.com"
+
         Example:
 
             keyword="TSMC"
@@ -490,7 +497,11 @@ class ArchiveWebService:
             source="CNA"
 
             keyword="TSMC",
+            url="tsmc.com"
+
+            keyword="TSMC",
             source="CNA",
+            url="cna.com.tw",
             date_from="2026-08-01",
             date_to="2026-08-09"
 
@@ -521,6 +532,16 @@ class ArchiveWebService:
             if not source:
 
                 source = None
+
+        if url is not None:
+
+            url = str(
+                url
+            ).strip()
+
+            if not url:
+
+                url = None
 
         if category is not None:
 
@@ -580,6 +601,7 @@ class ArchiveWebService:
                 .composite_search(
                     keyword=keyword,
                     source=source,
+                    url=url,
                     date_from=date_from,
                     date_to=date_to,
                     year=year,
@@ -741,6 +763,27 @@ class ArchiveWebService:
                 if str(
                     article_source
                 ).lower() != source.lower():
+
+                    continue
+
+            # ------------------------------------------
+            # URL
+            # ------------------------------------------
+
+            if url is not None:
+
+                article_url = get_value(
+                    article,
+                    "url"
+                )
+
+                if article_url is None:
+
+                    continue
+
+                if url.lower() not in str(
+                    article_url
+                ).lower():
 
                     continue
 
@@ -952,6 +995,9 @@ class ArchiveWebService:
 
         if source is not None:
             filters["source"] = source
+
+        if url is not None:
+            filters["url"] = url
 
         if date_from is not None:
             filters["date_from"] = date_from

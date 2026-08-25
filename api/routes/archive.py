@@ -18,11 +18,13 @@ P2.4.3 Composite Search Web UI
 
     Browser
         ↓
-    Archive Web UI
+    /archive/search
         ↓
-    FastAPI
+    Archive Search Web UI
         ↓
-    Archive API
+    /archive/search/api
+        ↓
+    Composite Archive Search API
         ↓
     ArchiveWebService
         ↓
@@ -39,15 +41,42 @@ P2.4.3 Composite Search Web UI
     GET /archive/ui
         Knowledge Archive Web UI
 
-    GET /archive/search/ui
+    GET /archive/search
         Composite Archive Search Web UI
 
-    GET /archive/search
-        Basic Archive Search API
+    GET /archive/search/ui
+        Composite Archive Search Web UI
+        相容入口
 
     GET /archive/search/api
-        Composite Archive Search API
+        Composite Archive Search JSON API
+
+Composite Search 支援:
+
+    keyword
+    url
+    source
+    date_from
+    date_to
+    year
+    month
+    category
+    importance_min
+    importance_max
+
+AI Result:
+
+    articles.ai_summary
+    articles.ai_category
+    articles.ai_keywords
+    articles.ai_importance
+    articles.ai_model
+    articles.ai_version
+    articles.ai_analyze_time
+    articles.ai_confidence
+    articles.ai_status
 """
+
 
 from fastapi import (
     APIRouter,
@@ -145,23 +174,25 @@ def archive_ui(
 # Composite Archive Search Web UI
 # ============================================================
 
-@router.get(
-    "/search/ui",
-    include_in_schema=False,
-)
-def search_ui(
+def _render_search_ui(
     request: Request,
 ):
     """
-    P2.4.3
+    Composite Archive Search Web UI 共用入口。
 
-    Composite Archive Search Web UI。
+    使用:
 
-    GET /archive/search/ui
+        GET /archive/search
+        GET /archive/search/ui
 
-    Composite Search API:
+    注意:
 
-        GET /archive/search/api
+        此路由只負責回傳 HTML。
+
+        Composite Search JSON API
+        使用:
+
+            GET /archive/search/api
     """
 
     return templates.TemplateResponse(
@@ -172,6 +203,68 @@ def search_ui(
             "version": "4.0",
             "page": "Composite Archive Search",
         },
+    )
+
+
+# ============================================================
+# /archive/search
+#
+# Composite Archive Search Web UI
+# ============================================================
+
+@router.get(
+    "/search",
+    include_in_schema=False,
+)
+def search_archive_ui(
+    request: Request,
+):
+    """
+    Composite Archive Search Web UI。
+
+    GET /archive/search
+
+    Browser 開啟此 URL 時，
+    應該顯示搜尋頁面，而不是 JSON。
+
+    Search UI 內部再呼叫:
+
+        GET /archive/search/api
+    """
+
+    return _render_search_ui(
+        request,
+    )
+
+
+# ============================================================
+# /archive/search/ui
+#
+# Composite Archive Search Web UI
+# Compatibility Endpoint
+# ============================================================
+
+@router.get(
+    "/search/ui",
+    include_in_schema=False,
+)
+def search_ui(
+    request: Request,
+):
+    """
+    Composite Archive Search Web UI。
+
+    GET /archive/search/ui
+
+    與:
+
+        GET /archive/search
+
+    使用相同 UI。
+    """
+
+    return _render_search_ui(
+        request,
     )
 
 
@@ -406,55 +499,215 @@ def get_by_source(
 
 
 # ============================================================
-# Basic Archive Search API
+# Composite Archive Search
 # ============================================================
 
-@router.get(
-    "/search",
-)
-def search_archive(
-    q: str = Query(
-        ...,
-        min_length=1,
-    ),
+def _composite_archive_search(
+    keyword: str | None = None,
+    url: str | None = None,
+    source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    year: int | None = None,
+    month: int | None = None,
+    category: str | None = None,
+    importance_min: float | None = None,
+    importance_max: float | None = None,
+    page: int = 1,
+    page_size: int = 20,
 ):
     """
-    Archive 基本搜尋。
+    Composite Archive Search 共用實作。
 
-    GET /archive/search?q=TSMC
+    所有搜尋條件皆為 Optional。
 
-    回傳 JSON。
+    支援:
+
+        keyword
+        url
+        source
+        date_from
+        date_to
+        year
+        month
+        category
+        importance_min
+        importance_max
+
+    AI Result:
+
+        ai_summary
+        ai_category
+        ai_keywords
+        ai_importance
+        ai_model
+        ai_version
+        ai_analyze_time
+        ai_confidence
+        ai_status
 
     注意:
 
-        /archive/search 是 JSON API。
+        API Layer 不直接操作 Database。
 
-        Composite Search Web UI:
-            /archive/search/ui
-
-        Composite Search API:
-            /archive/search/api
+        Repository / Service 負責取得資料。
     """
 
     service = get_archive_service()
 
-    return service.search(
-        q,
+    # ========================================================
+    # Normalize String Filters
+    # ========================================================
+
+    if keyword is not None:
+
+        keyword = str(
+            keyword
+        ).strip()
+
+        if not keyword:
+            keyword = None
+
+    if url is not None:
+
+        url = str(
+            url
+        ).strip()
+
+        if not url:
+            url = None
+
+    if source is not None:
+
+        source = str(
+            source
+        ).strip()
+
+        if not source:
+            source = None
+
+    if category is not None:
+
+        category = str(
+            category
+        ).strip()
+
+        if not category:
+            category = None
+
+    # ========================================================
+    # Validate Importance Range
+    # ========================================================
+
+    if (
+        importance_min is not None
+        and importance_max is not None
+        and importance_min > importance_max
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "importance_min cannot be "
+                "greater than importance_max"
+            ),
+        )
+
+    # ========================================================
+    # Validate Date Range
+    # ========================================================
+
+    if (
+        date_from is not None
+        and date_to is not None
+        and date_from > date_to
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "date_from cannot be "
+                "greater than date_to"
+            ),
+        )
+
+    # ========================================================
+    # Validate Month
+    # ========================================================
+
+    if (
+        month is not None
+        and (
+            month < 1
+            or month > 12
+        )
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Month must be between 1 and 12",
+        )
+
+    # ========================================================
+    # Composite Search
+    # ========================================================
+
+    result = service.composite_search(
+        keyword=keyword,
+        url=url,
+        source=source,
+        date_from=date_from,
+        date_to=date_to,
+        year=year,
+        month=month,
+        category=category,
+        importance_min=importance_min,
+        importance_max=importance_max,
+        page=page,
+        page_size=page_size,
     )
+
+    # ========================================================
+    # Normalize Empty Response
+    # ========================================================
+
+    if result is None:
+
+        return {
+            "results": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "filters": {
+                "keyword": keyword,
+                "url": url,
+                "source": source,
+                "date_from": date_from,
+                "date_to": date_to,
+                "year": year,
+                "month": month,
+                "category": category,
+                "importance_min": importance_min,
+                "importance_max": importance_max,
+            },
+        }
+
+    return result
 
 
 # ============================================================
-# P2.4.2
+# /archive/search/api
 #
-# Composite Archive Search API
+# Composite Archive Search JSON API
 # ============================================================
 
 @router.get(
     "/search/api",
 )
-def composite_search(
+def composite_search_api(
     keyword: str | None = Query(
         None,
+    ),
+    url: str | None = Query(
+        None,
+        description="Optional URL search filter",
     ),
     source: str | None = Query(
         None,
@@ -497,57 +750,53 @@ def composite_search(
     ),
 ):
     """
-    P2.4.2
+    Composite Archive Search JSON API。
 
-    Composite Archive Search API。
+    GET /archive/search/api
 
-    Endpoint:
+    Optional filters:
 
-        GET /archive/search/api
+        keyword
+        url
+        source
+        date_from
+        date_to
+        year
+        month
+        category
+        importance_min
+        importance_max
+
+    Examples:
+
+        /archive/search/api?keyword=TSMC
+
+        /archive/search/api?url=tsmc.com
+
+        /archive/search/api?keyword=TSMC&url=tsmc.com
+
+        /archive/search/api?source=CNA&url=cna.com.tw
+
+        /archive/search/api?category=Semiconductor
+
+    AI Result:
+
+        results[*].ai_summary
+
+    回傳:
+
+        {
+            "results": [...],
+            "total": ...,
+            "page": ...,
+            "page_size": ...,
+            "filters": {...}
+        }
     """
 
-    service = get_archive_service()
-
-    # --------------------------------------------------------
-    # Validate Importance Range
-    # --------------------------------------------------------
-
-    if (
-        importance_min is not None
-        and importance_max is not None
-        and importance_min > importance_max
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "importance_min cannot be "
-                "greater than importance_max"
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Validate Date Range
-    # --------------------------------------------------------
-
-    if (
-        date_from is not None
-        and date_to is not None
-        and date_from > date_to
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "date_from cannot be "
-                "greater than date_to"
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Composite Search
-    # --------------------------------------------------------
-
-    result = service.composite_search(
+    return _composite_archive_search(
         keyword=keyword,
+        url=url,
         source=source,
         date_from=date_from,
         date_to=date_to,
@@ -559,31 +808,6 @@ def composite_search(
         page=page,
         page_size=page_size,
     )
-
-    # --------------------------------------------------------
-    # Normalize API Response
-    # --------------------------------------------------------
-
-    if result is None:
-        return {
-            "results": [],
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "filters": {
-                "keyword": keyword,
-                "source": source,
-                "date_from": date_from,
-                "date_to": date_to,
-                "year": year,
-                "month": month,
-                "category": category,
-                "importance_min": importance_min,
-                "importance_max": importance_max,
-            },
-        }
-
-    return result
 
 
 # ============================================================

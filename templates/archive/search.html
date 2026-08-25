@@ -313,6 +313,73 @@
             color: #374151;
 
             white-space: pre-wrap;
+
+            margin-top: 10px;
+        }
+
+
+        /* ==================================================
+           AI Summary
+           ================================================== */
+
+        .ai-summary {
+
+            margin-top: 12px;
+
+            padding: 14px 16px;
+
+            background: #f0fdf4;
+
+            border-left:
+                4px solid #16a34a;
+
+            border-radius: 5px;
+
+            line-height: 1.7;
+
+            color: #166534;
+
+            white-space: pre-wrap;
+        }
+
+
+        .ai-summary-title {
+
+            font-weight: bold;
+
+            margin-bottom: 6px;
+
+            color: #15803d;
+        }
+
+
+        /* ==================================================
+           URL
+           ================================================== */
+
+        .url {
+
+            margin-top: 8px;
+
+            font-size: 13px;
+
+            word-break: break-all;
+
+            color: #6b7280;
+        }
+
+
+        .url a {
+
+            color: #2563eb;
+
+            text-decoration: none;
+        }
+
+
+        .url a:hover {
+
+            text-decoration: underline;
         }
 
 
@@ -557,6 +624,23 @@
                     type="text"
                     id="keyword"
                     placeholder="例如：TSMC"
+                >
+
+            </div>
+
+
+            <!-- URL -->
+
+            <div class="field">
+
+                <label for="url">
+                    URL
+                </label>
+
+                <input
+                    type="text"
+                    id="url"
+                    placeholder="例如：https://www.tsmc.com/"
                 >
 
             </div>
@@ -811,13 +895,21 @@
    API Endpoint
    ==================================================
 
-   /archive/search
-       ↓
-   Web UI
+   Web UI:
 
-   /archive/search/api
-       ↓
-   Composite Search JSON API
+       GET /archive/search
+           ↓
+       archive/search.html
+
+   JSON API:
+
+       GET /archive/search/api
+           ↓
+       Composite Archive Search
+
+   重要：
+   /archive/search 是 HTML 頁面。
+   /archive/search/api 才是 JSON API。
 
    ================================================== */
 
@@ -920,6 +1012,8 @@ function buildSearchParams(
 
         "keyword",
 
+        "url",
+
         "source",
 
         "date_from",
@@ -960,7 +1054,7 @@ function buildSearchParams(
 
 
             /*
-             * Composite Search 原則：
+             * Optional Filter：
              *
              * 使用者沒有輸入的條件
              * 不送出。
@@ -1045,10 +1139,6 @@ async function searchArchive(
         );
 
 
-    /*
-     * Clear old result
-     */
-
     status.className =
         "status";
 
@@ -1078,7 +1168,7 @@ async function searchArchive(
 
 
         /*
-         * Build query
+         * Build Query
          */
 
         const params =
@@ -1087,21 +1177,22 @@ async function searchArchive(
             );
 
 
-        const url =
+        const requestUrl =
             SEARCH_API +
             "?" +
             params.toString();
 
 
         /*
-         * Request
+         * Request JSON API
          */
 
         const response =
             await fetch(
-                url,
+                requestUrl,
                 {
                     method: "GET",
+
                     headers: {
                         "Accept":
                             "application/json"
@@ -1111,18 +1202,108 @@ async function searchArchive(
 
 
         /*
-         * Read raw response first.
+         * Content-Type Check
          *
-         * 不直接 response.json()
-         *
-         * 避免：
-         *
-         * Unexpected token '<'
+         * 避免把 HTML 頁面誤當 JSON。
+         */
+
+        const contentType =
+            response.headers.get(
+                "content-type"
+            ) || "";
+
+
+        /*
+         * Read raw response first
          */
 
         const raw =
             await response.text();
 
+
+        /*
+         * HTTP Error
+         */
+
+        if (!response.ok) {
+
+            let detail =
+                "Search API request failed";
+
+
+            try {
+
+                const errorData =
+                    JSON.parse(
+                        raw
+                    );
+
+
+                detail =
+                    errorData.detail ||
+                    errorData.message ||
+                    detail;
+
+            }
+            catch (
+                ignored
+            ) {
+
+                if (raw.trim() !== "") {
+
+                    detail =
+                        raw.substring(
+                            0,
+                            300
+                        );
+
+                }
+
+            }
+
+
+            throw new Error(
+                detail
+            );
+
+        }
+
+
+        /*
+         * JSON Validation
+         */
+
+        if (
+            !contentType.includes(
+                "application/json"
+            )
+        ) {
+
+            console.error(
+                "Unexpected Content-Type:",
+                contentType
+            );
+
+            console.error(
+                "Response:",
+                raw
+            );
+
+
+            throw new Error(
+                "Search API 回傳的不是 JSON。"
+                +
+                " 請確認 /archive/search/api "
+                +
+                "是否正確註冊為 API Route。"
+            );
+
+        }
+
+
+        /*
+         * Parse JSON
+         */
 
         let data;
 
@@ -1146,30 +1327,7 @@ async function searchArchive(
 
 
             throw new Error(
-                "API 沒有回傳 JSON。"
-                +
-                " HTTP "
-                +
-                response.status
-            );
-
-        }
-
-
-        /*
-         * HTTP Error
-         */
-
-        if (!response.ok) {
-
-            const detail =
-                data.detail ||
-                data.message ||
-                "Search API request failed";
-
-
-            throw new Error(
-                detail
+                "Search API JSON 格式錯誤。"
             );
 
         }
@@ -1261,7 +1419,7 @@ function renderSearchResults(
 
 
     /*
-     * Support:
+     * Expected Response:
      *
      * {
      *   results: [],
@@ -1271,6 +1429,7 @@ function renderSearchResults(
      *   filters: {}
      * }
      */
+
 
     const items =
         Array.isArray(
@@ -1331,6 +1490,17 @@ function renderSearchResults(
     const filterKeys =
         Object.keys(
             filters
+        )
+        .filter(
+            function(key) {
+
+                return (
+                    filters[key] !== null &&
+                    filters[key] !== undefined &&
+                    filters[key] !== ""
+                );
+
+            }
         );
 
 
@@ -1403,7 +1573,7 @@ function renderSearchResults(
 
 
     /*
-     * Render articles
+     * Render Articles
      */
 
     resultsContainer.innerHTML =
@@ -1501,6 +1671,26 @@ function renderArticle(
         );
 
 
+    /*
+     * AI Summary
+     *
+     * 預期由 Repository / Service
+     * 直接回傳 article.ai_summary
+     */
+
+    const aiSummary =
+        getValue(
+            article,
+            [
+                "ai_summary"
+            ]
+        );
+
+
+    /*
+     * Original Content
+     */
+
     const content =
         getValue(
             article,
@@ -1510,6 +1700,10 @@ function renderArticle(
             ]
         );
 
+
+    /*
+     * Title
+     */
 
     let titleHtml;
 
@@ -1534,6 +1728,10 @@ function renderArticle(
 
     }
 
+
+    /*
+     * Badges
+     */
 
     let badges = "";
 
@@ -1586,6 +1784,78 @@ function renderArticle(
     }
 
 
+    /*
+     * AI Summary
+     */
+
+    let aiSummaryHtml = "";
+
+
+    if (
+        aiSummary !== null &&
+        aiSummary !== undefined &&
+        String(aiSummary).trim() !== ""
+    ) {
+
+        aiSummaryHtml =
+
+            `
+
+            <div class="ai-summary">
+
+                <div class="ai-summary-title">
+
+                    AI Summary
+
+                </div>
+
+                ${escapeHtml(aiSummary)}
+
+            </div>
+
+            `;
+
+    }
+
+
+    /*
+     * URL
+     */
+
+    let urlHtml = "";
+
+
+    if (url) {
+
+        urlHtml =
+
+            `
+
+            <div class="url">
+
+                URL:
+
+                <a
+                    href="${escapeHtml(url)}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+
+                    ${escapeHtml(url)}
+
+                </a>
+
+            </div>
+
+            `;
+
+    }
+
+
+    /*
+     * Article HTML
+     */
+
     return `
 
         <div class="result">
@@ -1616,12 +1886,22 @@ function renderArticle(
             </div>
 
 
+            ${urlHtml}
+
+
+            ${aiSummaryHtml}
+
+
             ${
                 content
                 ? `
+
                     <div class="content">
+
                         ${escapeHtml(content)}
+
                     </div>
+
                   `
                 : ""
             }
@@ -1705,10 +1985,11 @@ function renderPagination(
 
 function resetSearch() {
 
-
     const fields = [
 
         "keyword",
+
+        "url",
 
         "source",
 
