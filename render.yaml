@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: autosearch-v5
+    runtime: docker
+    plan: free
+
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    healthCheckPath: /targets/ui
