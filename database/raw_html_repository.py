@@ -43,7 +43,6 @@ Crawl 階段：
 
     因此：
 
-        article_id = None
         document_id = None
 
     但已經具有：
@@ -52,51 +51,71 @@ Crawl 階段：
         resolved_url
         html
         content_hash
+        created_at
 
 
-Article 建立後：
+Archive Version：
 
-    RawHTMLRepository.update_metadata()
+    不使用 Article ID。
 
-    補回：
+    Version Identity：
 
-        article_id
-        document_id
-
-
-Duplicate Detection：
-
-    本 Repository 只提供 Lookup。
-
-    不負責：
-
-        Duplicate Decision
-        New Version Decision
-        Archive Version
+        URL
+        +
+        created_at
 
 
-Duplicate Identity：
+Archive Web Page：
 
     URL
-    +
-    Content Hash
+        |
+        v
+    find_versions_by_url()
+        |
+        v
+    歷史版本保存日期列表
+        |
+        v
+    使用者選擇保存日期
+        |
+        v
+    find_html_by_url_and_time()
+        |
+        v
+    MongoDB Raw HTML
+        |
+        v
+    自己的 Archive Web Page
 
-    由 ArchiveService 負責。
+
+版本列表只需要顯示：
+
+    2026-08-29 14:20
+    2026-08-28 14:15
+    2026-08-25 09:32
 
 
-Hash：
+V5 datetime policy：
 
-    不由 Repository 計算。
+    所有 created_at / updated_at
+    一律使用 timezone-aware UTC datetime。
 
-    Hash 由：
 
-        CrawlService
+    Naive datetime：
 
-    或：
+        視為 UTC
 
-        ArchiveService
 
-    產生。
+    ISO 8601：
+
+        2026-08-29T14:20:00Z
+            ↓
+        timezone-aware UTC datetime
+
+
+    Timezone-aware datetime：
+
+        自動轉換為 UTC。
 
 
 本 Repository 不負責：
@@ -108,8 +127,9 @@ Hash：
     - Article Model
     - MySQL ArticleRepository
     - Archive Duplicate Detection
-    - Archive Version
+    - Archive Version Decision
     - AI Analysis
+    - Web UI
 """
 
 
@@ -119,7 +139,10 @@ Hash：
 #
 # ==================================================
 
-from datetime import datetime
+from datetime import (
+    datetime,
+    timezone,
+)
 
 
 # ==================================================
@@ -131,7 +154,7 @@ from datetime import datetime
 from bson import ObjectId
 
 from pymongo.errors import (
-    PyMongoError
+    PyMongoError,
 )
 
 
@@ -142,17 +165,15 @@ from pymongo.errors import (
 # ==================================================
 
 from config.mongo_config import (
-    MONGO_RAW_HTML_COLLECTION
+    MONGO_RAW_HTML_COLLECTION,
 )
-
 
 from database.mongo_connection import (
-    get_mongo_collection
+    get_mongo_collection,
 )
 
-
 from utils.logger import (
-    logger
+    logger,
 )
 
 
@@ -175,14 +196,26 @@ class RawHTMLRepository:
         MongoDB
 
 
+    Archive Viewer 所需的核心查詢：
+
+        URL
+            ↓
+        歷史保存日期
+            ↓
+        URL + created_at
+            ↓
+        指定 Raw HTML
+
+
     Repository 不負責：
 
         - Hash Calculation
         - Duplicate Detection
-        - Archive Version
+        - Archive Version Decision
         - Parser
         - Article
         - AI
+        - Web UI
     """
 
     # ==================================================
@@ -202,6 +235,130 @@ class RawHTMLRepository:
         self._ensure_indexes()
 
     # ==================================================
+    # Normalize Datetime
+    # ==================================================
+
+    @staticmethod
+    def _normalize_datetime(
+        value
+    ):
+        """
+        將 datetime / ISO 8601
+        統一轉換為 timezone-aware UTC datetime。
+
+        支援：
+
+            datetime
+            ISO 8601 string
+            ISO 8601 + Z
+            ISO 8601 + timezone offset
+
+
+        規則：
+
+            timezone-aware datetime
+                ↓
+            轉換為 UTC
+
+
+            naive datetime
+                ↓
+            視為 UTC
+
+
+        例如：
+
+            2026-08-29T14:20:00Z
+                ↓
+            2026-08-29 14:20:00+00:00
+
+
+            2026-08-29T22:20:00+08:00
+                ↓
+            2026-08-29 14:20:00+00:00
+        """
+
+        if value is None:
+
+            return None
+
+        # --------------------------------------------------
+        # String
+        # --------------------------------------------------
+
+        if isinstance(
+            value,
+            str,
+        ):
+
+            value = value.strip()
+
+            if not value:
+
+                return None
+
+            try:
+
+                value = datetime.fromisoformat(
+                    value.replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                logger.warning(
+                    "Invalid datetime: "
+                    f"{value}"
+                )
+
+                return None
+
+        # --------------------------------------------------
+        # Validate datetime
+        # --------------------------------------------------
+
+        if not isinstance(
+            value,
+            datetime,
+        ):
+
+            logger.warning(
+                "Unsupported datetime type: "
+                f"{type(value)}"
+            )
+
+            return None
+
+        # --------------------------------------------------
+        # Naive datetime
+        #
+        # V5：
+        #
+        # Naive datetime 一律視為 UTC。
+        # --------------------------------------------------
+
+        if value.tzinfo is None:
+
+            return value.replace(
+                tzinfo=timezone.utc,
+            )
+
+        # --------------------------------------------------
+        # Timezone-aware datetime
+        #
+        # Normalize to UTC.
+        # --------------------------------------------------
+
+        return value.astimezone(
+            timezone.utc,
+        )
+
+    # ==================================================
     # Ensure Indexes
     # ==================================================
 
@@ -213,7 +370,6 @@ class RawHTMLRepository:
 
         Index：
 
-            article_id
             document_id
             url
             resolved_url
@@ -221,40 +377,92 @@ class RawHTMLRepository:
 
             url + content_hash
 
+            url + created_at
+
         注意：
 
             所有 Index 都不是 Unique。
 
             Duplicate Detection
             仍由 ArchiveService 負責。
+
+
+        Archive Viewer：
+
+            主要使用：
+
+                url + created_at
         """
 
         try:
 
-            self.collection.create_index(
-                "article_id"
-            )
+            # ------------------------------------------
+            # Document ID
+            # ------------------------------------------
 
             self.collection.create_index(
                 "document_id"
             )
 
+            # ------------------------------------------
+            # URL
+            # ------------------------------------------
+
             self.collection.create_index(
                 "url"
             )
+
+            # ------------------------------------------
+            # Resolved URL
+            # ------------------------------------------
 
             self.collection.create_index(
                 "resolved_url"
             )
 
+            # ------------------------------------------
+            # Content Hash
+            # ------------------------------------------
+
             self.collection.create_index(
                 "content_hash"
             )
 
+            # ------------------------------------------
+            # URL + Content Hash
+            #
+            # Duplicate Lookup
+            #
+            # 由 ArchiveService 使用。
+            # ------------------------------------------
+
             self.collection.create_index(
                 [
                     ("url", 1),
-                    ("content_hash", 1)
+                    ("content_hash", 1),
+                ]
+            )
+
+            # ------------------------------------------
+            # URL + Created At
+            #
+            # Archive Version Lookup
+            #
+            # 用於：
+            #
+            #     URL
+            #       ↓
+            #     歷史保存日期
+            #
+            #     URL + created_at
+            #       ↓
+            #     指定 HTML Snapshot
+            # ------------------------------------------
+
+            self.collection.create_index(
+                [
+                    ("url", 1),
+                    ("created_at", -1),
                 ]
             )
 
@@ -281,8 +489,7 @@ class RawHTMLRepository:
         html=None,
         content_hash=None,
         resolved_url=None,
-        article_id=None,
-        document_id=None
+        document_id=None,
     ):
         """
         儲存 Raw HTML Snapshot。
@@ -294,23 +501,26 @@ class RawHTMLRepository:
             content_hash
 
 
-        Article 建立前：
+        可選 metadata：
 
-            article_id=None
-            document_id=None
+            resolved_url
+            document_id
 
 
-        Article 建立後：
+        Archive Version：
 
-            可透過 update_metadata()
-            補回 Article Identity。
+            不依賴 Article ID。
+
+            保存時間：
+
+                created_at
 
 
         本方法不負責：
 
             Hash Calculation
             Duplicate Detection
-            Archive Version
+            Archive Version Decision
         """
 
         # ==================================================
@@ -406,30 +616,6 @@ class RawHTMLRepository:
                 resolved_url = None
 
         # ==================================================
-        # Normalize Article ID
-        # ==================================================
-
-        if article_id is not None:
-
-            try:
-
-                article_id = int(
-                    article_id
-                )
-
-            except (
-                TypeError,
-                ValueError
-            ):
-
-                logger.error(
-                    "Raw HTML save failed: "
-                    f"invalid article_id={article_id}"
-                )
-
-                return None
-
-        # ==================================================
         # Normalize Document ID
         # ==================================================
 
@@ -444,19 +630,18 @@ class RawHTMLRepository:
                 document_id = None
 
         # ==================================================
-        # Current Time
+        # Current UTC Time
         # ==================================================
 
-        now = datetime.now()
+        now = datetime.now(
+            timezone.utc,
+        )
 
         # ==================================================
         # MongoDB Document
         # ==================================================
 
         document = {
-
-            "article_id":
-                article_id,
 
             "document_id":
                 document_id,
@@ -477,7 +662,7 @@ class RawHTMLRepository:
                 now,
 
             "updated_at":
-                now
+                now,
 
         }
 
@@ -502,9 +687,9 @@ class RawHTMLRepository:
                 f"mongo_id={mongo_id}, "
                 f"url={url}, "
                 f"resolved_url={resolved_url}, "
-                f"article_id={article_id}, "
                 f"document_id={document_id}, "
-                f"content_hash={content_hash}"
+                f"content_hash={content_hash}, "
+                f"created_at={now}"
             )
 
             return mongo_id
@@ -540,14 +725,12 @@ class RawHTMLRepository:
 
         Crawl 階段：
 
-            article_id=None
-            document_id=None
+            不需要 Article ID。
 
 
         Returns：
 
             MongoDB ObjectId string
-
         """
 
         if crawl_result is None:
@@ -620,10 +803,6 @@ class RawHTMLRepository:
 
             content_hash=content_hash,
 
-            article_id=None,
-
-            document_id=None
-
         )
 
     # ==================================================
@@ -681,51 +860,6 @@ class RawHTMLRepository:
             return None
 
     # ==================================================
-    # Find By Article ID
-    # ==================================================
-
-    def find_by_article_id(
-        self,
-        article_id
-    ):
-        """
-        查詢 Article 最新 Raw HTML Snapshot。
-        """
-
-        if article_id is None:
-
-            return None
-
-        try:
-
-            return (
-                self.collection.find_one(
-
-                    {
-                        "article_id":
-                            article_id
-                    },
-
-                    sort=[
-                        (
-                            "created_at",
-                            -1
-                        )
-                    ]
-
-                )
-            )
-
-        except PyMongoError as e:
-
-            logger.exception(
-                "Raw HTML find_by_article_id failed: "
-                f"{e}"
-            )
-
-            return None
-
-    # ==================================================
     # Find By Document ID
     # ==================================================
 
@@ -734,8 +868,8 @@ class RawHTMLRepository:
         document_id
     ):
         """
-        查詢 Article Document
-        最新 Raw HTML Snapshot。
+        依 Document ID
+        查詢最新 Raw HTML Snapshot。
         """
 
         if not document_id:
@@ -790,6 +924,10 @@ class RawHTMLRepository:
         """
         依原始 URL
         查詢最新 Raw HTML Snapshot。
+
+        用途：
+
+            Archive Viewer 預設顯示最新版本。
         """
 
         if not url:
@@ -832,6 +970,279 @@ class RawHTMLRepository:
             )
 
             return None
+
+    # ==================================================
+    # Find Versions By URL
+    # ==================================================
+
+    def find_versions_by_url(
+        self,
+        url
+    ):
+        """
+        取得指定 URL 的所有 Raw HTML Snapshot
+        歷史保存版本。
+
+        Archive Version 對使用者而言：
+
+            只顯示保存成功日期。
+
+
+        回傳：
+
+            mongo_id
+            created_at
+
+
+        content_hash：
+
+            保留給內部使用。
+
+            不需要顯示在 Archive UI。
+
+
+        不回傳：
+
+            html
+
+
+        最新保存版本在前。
+        """
+
+        if not url:
+
+            return []
+
+        url = str(
+            url
+        ).strip()
+
+        if not url:
+
+            return []
+
+        try:
+
+            cursor = (
+                self.collection.find(
+
+                    {
+                        "url":
+                            url
+                    },
+
+                    {
+                        "_id": 1,
+                        "created_at": 1
+                    }
+
+                )
+                .sort(
+                    "created_at",
+                    -1
+                )
+            )
+
+            versions = []
+
+            for document in cursor:
+
+                created_at = (
+                    document.get(
+                        "created_at"
+                    )
+                )
+
+                normalized_created_at = (
+                    self._normalize_datetime(
+                        created_at
+                    )
+                )
+
+                if normalized_created_at is None:
+
+                    continue
+
+                versions.append({
+
+                    "mongo_id":
+                        str(
+                            document["_id"]
+                        ),
+
+                    "created_at":
+                        normalized_created_at,
+
+                })
+
+            logger.info(
+                "Raw HTML versions found by URL: "
+                f"url={url}, "
+                f"count={len(versions)}"
+            )
+
+            return versions
+
+        except PyMongoError as e:
+
+            logger.exception(
+                "Raw HTML find_versions_by_url failed: "
+                f"{e}"
+            )
+
+            return []
+
+    # ==================================================
+    # Find By URL + Time
+    # ==================================================
+
+    def find_by_url_and_time(
+        self,
+        url,
+        created_at
+    ):
+        """
+        依：
+
+            URL
+            +
+            created_at
+
+        查詢指定 Raw HTML Snapshot。
+
+        Archive Version Identity：
+
+            URL
+            +
+            created_at
+
+
+        V5 datetime policy：
+
+            created_at 必須先統一成
+            timezone-aware UTC datetime。
+
+
+        用途：
+
+            使用者在 Archive Web Page
+            點擊某個歷史保存日期：
+
+                URL + created_at
+                    ↓
+                MongoDB
+                    ↓
+                指定 Snapshot
+        """
+
+        if not url:
+
+            return None
+
+        if created_at is None:
+
+            return None
+
+        url = str(
+            url
+        ).strip()
+
+        if not url:
+
+            return None
+
+        # ==================================================
+        # Normalize Created At
+        # ==================================================
+
+        created_at = (
+            self._normalize_datetime(
+                created_at
+            )
+        )
+
+        if created_at is None:
+
+            return None
+
+        # ==================================================
+        # MongoDB Lookup
+        # ==================================================
+
+        try:
+
+            return (
+                self.collection.find_one(
+
+                    {
+                        "url":
+                            url,
+
+                        "created_at":
+                            created_at
+                    }
+
+                )
+            )
+
+        except PyMongoError as e:
+
+            logger.exception(
+                "Raw HTML find_by_url_and_time failed: "
+                f"{e}"
+            )
+
+            return None
+
+    # ==================================================
+    # Find HTML By URL + Time
+    # ==================================================
+
+    def find_html_by_url_and_time(
+        self,
+        url,
+        created_at
+    ):
+        """
+        依：
+
+            URL
+            +
+            created_at
+
+        取得指定歷史保存版本的 Raw HTML。
+
+        只回傳 HTML。
+
+        用途：
+
+            Archive Article Page
+                ↓
+            使用者選擇歷史保存日期
+                ↓
+            URL + created_at
+                ↓
+            MongoDB
+                ↓
+            HTML
+                ↓
+            Web Page
+        """
+
+        document = (
+            self.find_by_url_and_time(
+                url,
+                created_at
+            )
+        )
+
+        if document is None:
+
+            return None
+
+        return document.get(
+            "html"
+        )
 
     # ==================================================
     # Find By Resolved URL
@@ -1081,9 +1492,7 @@ class RawHTMLRepository:
 
             只提供 Lookup。
 
-            不代表：
-
-                Duplicate
+            不代表 Duplicate。
 
             Duplicate Decision：
 
@@ -1095,6 +1504,18 @@ class RawHTMLRepository:
             return False
 
         if not content_hash:
+
+            return False
+
+        url = str(
+            url
+        ).strip()
+
+        content_hash = str(
+            content_hash
+        ).strip()
+
+        if not url or not content_hash:
 
             return False
 
@@ -1137,22 +1558,20 @@ class RawHTMLRepository:
     def update_metadata(
         self,
         mongo_id,
-        article_id=None,
         document_id=None
     ):
         """
-        Crawl 完成後：
+        Crawl / Parser 完成後：
 
             MongoDB Raw HTML
                     ↓
             Article 建立
                     ↓
-            補回 Article Identity
+            補回 Document Identity
 
 
         更新：
 
-            article_id
             document_id
 
 
@@ -1162,69 +1581,53 @@ class RawHTMLRepository:
             resolved_url
             html
             content_hash
+            created_at
+
+
+        updated_at：
+
+            使用 UTC datetime。
+
+
+        注意：
+
+            不再處理 article_id。
+
+            Archive Version
+            不依賴 Article ID。
         """
 
         if not mongo_id:
 
             return False
 
-        update_data = {}
-
         # ==================================================
-        # Article ID
+        # Normalize Document ID
         # ==================================================
 
-        if article_id is not None:
-
-            try:
-
-                article_id = int(
-                    article_id
-                )
-
-                update_data[
-                    "article_id"
-                ] = article_id
-
-            except (
-                TypeError,
-                ValueError
-            ):
-
-                logger.error(
-                    "Invalid article_id: "
-                    f"{article_id}"
-                )
-
-                return False
-
-        # ==================================================
-        # Document ID
-        # ==================================================
-
-        if document_id is not None:
-
-            document_id = str(
-                document_id
-            ).strip()
-
-            if document_id:
-
-                update_data[
-                    "document_id"
-                ] = document_id
-
-        # ==================================================
-        # Nothing To Update
-        # ==================================================
-
-        if not update_data:
+        if document_id is None:
 
             return False
 
-        update_data[
-            "updated_at"
-        ] = datetime.now()
+        document_id = str(
+            document_id
+        ).strip()
+
+        if not document_id:
+
+            return False
+
+        update_data = {
+
+            "document_id":
+                document_id,
+
+            "updated_at":
+                datetime.now(
+                    timezone.utc
+                ),
+
+        }
 
         # ==================================================
         # MongoDB Update
@@ -1266,7 +1669,6 @@ class RawHTMLRepository:
             logger.info(
                 "Raw HTML metadata updated: "
                 f"mongo_id={mongo_id}, "
-                f"article_id={article_id}, "
                 f"document_id={document_id}"
             )
 
@@ -1304,6 +1706,11 @@ class RawHTMLRepository:
         Archive Version：
 
             由 ArchiveService 管理。
+
+
+        updated_at：
+
+            使用 UTC datetime。
         """
 
         if not mongo_id:
@@ -1356,7 +1763,9 @@ class RawHTMLRepository:
                                 content_hash,
 
                             "updated_at":
-                                datetime.now()
+                                datetime.now(
+                                    timezone.utc
+                                ),
 
                         }
                     }

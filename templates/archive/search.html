@@ -1703,6 +1703,37 @@ function renderArticle(
 
     /*
      * Title
+     *
+     * ==================================================
+     * V5 Archive Viewer
+     * ==================================================
+     *
+     * 舊行為：
+     *
+     *     點擊文章標題
+     *         ↓
+     *     直接前往原始 URL
+     *
+     *
+     * 新行為：
+     *
+     *     點擊文章標題
+     *         ↓
+     *     /archive/view?url=<原始 URL>
+     *         ↓
+     *     Archive Viewer
+     *         ↓
+     *     MongoDB Snapshot History
+     *
+     *
+     * 注意：
+     *
+     *     原始 URL 仍然保留在 Search Result。
+     *
+     *     只有文章標題的導航行為改成
+     *     Archive Viewer。
+     *
+     * ==================================================
      */
 
     let titleHtml;
@@ -1710,13 +1741,38 @@ function renderArticle(
 
     if (url) {
 
+        /*
+         * 建立 Archive Viewer URL。
+         *
+         * URLSearchParams / encodeURIComponent
+         * 確保原始 URL 中的：
+         *
+         *     ?
+         *     &
+         *     =
+         *     #
+         *
+         * 不會破壞 Viewer Query String。
+         */
+
+        const viewerUrl =
+            "/archive/view?url=" +
+            encodeURIComponent(
+                String(url)
+            );
+
+
         titleHtml =
 
             '<a href="' +
-            escapeHtml(url) +
-            '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtml(
+                viewerUrl
+            ) +
+            '">' +
 
-            escapeHtml(title) +
+            escapeHtml(
+                title
+            ) +
 
             "</a>";
 
@@ -1724,7 +1780,9 @@ function renderArticle(
     else {
 
         titleHtml =
-            escapeHtml(title);
+            escapeHtml(
+                title
+            );
 
     }
 
@@ -1744,7 +1802,9 @@ function renderArticle(
 
             "Source: " +
 
-            escapeHtml(source) +
+            escapeHtml(
+                source
+            ) +
 
             "</span>";
 
@@ -1759,7 +1819,9 @@ function renderArticle(
 
             "Category: " +
 
-            escapeHtml(category) +
+            escapeHtml(
+                category
+            ) +
 
             "</span>";
 
@@ -1777,7 +1839,9 @@ function renderArticle(
 
             "Importance: " +
 
-            escapeHtml(importance) +
+            escapeHtml(
+                importance
+            ) +
 
             "</span>";
 
@@ -1820,6 +1884,18 @@ function renderArticle(
 
     /*
      * URL
+     *
+     * 注意：
+     *
+     * URL 顯示仍然可以直接開啟原始網站。
+     *
+     * 本次修改只要求：
+     *
+     *     文章標題
+     *         ↓
+     *     Archive Viewer
+     *
+     * 因此 URL 欄位維持原本行為。
      */
 
     let urlHtml = "";

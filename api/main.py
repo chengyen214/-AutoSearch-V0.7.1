@@ -290,6 +290,8 @@ from api.routes import (
 
     archive,
 
+    archive_viewer,
+
     archive_management,
 
     historical_search,
@@ -736,6 +738,16 @@ app.include_router(
 
 app.include_router(
     archive.router
+)
+
+
+# ==================================================
+# V5
+# Archive Viewer
+# ==================================================
+
+app.include_router(
+    archive_viewer.router
 )
 
 
