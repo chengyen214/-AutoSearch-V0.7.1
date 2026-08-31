@@ -1,7 +1,7 @@
 """
 utils/reset_test.py
 
-AutoSearch V4
+AutoSearch V5
 
 Test Environment Reset Tool
 
@@ -13,7 +13,6 @@ Test Environment Reset Tool
 4. 清除 Legacy Local HTML Archive
 5. 清除 MongoDB Raw HTML Archive
 6. 清除 MySQL Test Data
-7. Reset MySQL Auto Increment ID
 
 Database Flow：
 
@@ -33,6 +32,38 @@ ai_tasks   raw_documents
 +------articles
 
 
+MySQL：
+
+保留：
+
+    jobs
+    targets
+
+以及：
+
+    jobs 內所有資料
+    targets 內所有資料
+
+
+其他 MySQL Table：
+
+    只刪除資料
+
+    不：
+
+        DROP TABLE
+        TRUNCATE TABLE
+        ALTER TABLE
+        修改 Schema
+        修改 Index
+        修改 Foreign Key
+
+
+migration_history：
+
+    完全不動
+
+
 MongoDB：
 
 autosearch
@@ -49,10 +80,23 @@ IMPORTANT：
     不刪除 MongoDB collection
     不刪除 MongoDB indexes
 
-只清除測試資料。
+MySQL：
 
-AutoSearch V4 現在 Raw HTML Archive
-已正式使用 MongoDB。
+    jobs
+        ↓
+    保留 Table + Data
+
+    targets
+        ↓
+    保留 Table + Data
+
+其他資料表：
+
+    只 DELETE Data
+
+
+AutoSearch V5 Raw HTML Archive
+正式使用 MongoDB。
 
 因此：
 
@@ -70,24 +114,44 @@ AutoSearch V4 現在 Raw HTML Archive
 """
 
 
+# ==================================================
+#
+# Standard Library
+#
+# ==================================================
+
 import os
 import json
 import shutil
 
+
+# ==================================================
+#
+# MySQL
+#
+# ==================================================
 
 from database.connection import (
     get_connection
 )
 
 
+# ==================================================
+#
+# MongoDB
+#
+# ==================================================
+
 from database.raw_html_repository import (
     RawHTMLRepository
 )
 
 
-# ======================================
+# ==================================================
+#
 # Local Paths
-# ======================================
+#
+# ==================================================
 
 DOCUMENT_FILE = (
     "storage/documents.json"
@@ -104,18 +168,20 @@ EXCEL_FILE = (
 )
 
 
-# ======================================
-# Legacy Local Archive
-# ======================================
+# ==================================================
 #
-# AutoSearch V4 目前正式 Raw HTML
+# Legacy Local Archive
+#
+# ==================================================
+#
+# AutoSearch V5 目前正式 Raw HTML
 # 已改存 MongoDB。
 #
 # 這個目錄只保留作為：
 #
 # Legacy / Migration / 舊測試資料
 #
-# ======================================
+# ==================================================
 
 ARCHIVE_DIR = (
     "archive/html"
@@ -127,9 +193,68 @@ LOG_DIR = (
 )
 
 
-# ======================================
+# ==================================================
+#
+# MySQL Tables
+#
+# ==================================================
+#
+# IMPORTANT：
+#
+# 以下 Table 只清除資料。
+#
+# 不 DROP
+# 不 TRUNCATE
+# 不 ALTER TABLE
+# 不修改 Schema
+# 不修改 Index
+# 不修改 FK
+#
+# jobs / targets 不在這裡。
+#
+# 因為：
+#
+# jobs
+# targets
+#
+# 必須保留 Table + Data。
+#
+# ==================================================
+
+MYSQL_DATA_RESET_TABLES = [
+
+    # ----------------------------------------------
+    # Child Tables
+    # ----------------------------------------------
+
+    "search_index",
+
+    "knowledge_scores",
+
+    "archive_versions",
+
+    "knowledge_archive",
+
+    "ai_tasks",
+
+    "raw_documents",
+
+    "article_metadata",
+
+    # ----------------------------------------------
+    # Parent Table
+    # ----------------------------------------------
+
+    "articles",
+
+]
+
+
+# ==================================================
+#
 # Reset JSON
-# ======================================
+#
+# ==================================================
 
 def reset_json(
     path
@@ -163,9 +288,11 @@ def reset_json(
         )
 
 
-# ======================================
+# ==================================================
+#
 # Remove File
-# ======================================
+#
+# ==================================================
 
 def remove_file(
     path
@@ -190,9 +317,11 @@ def remove_file(
         )
 
 
-# ======================================
+# ==================================================
+#
 # Clear Directory
-# ======================================
+#
+# ==================================================
 
 def clear_directory(
     path
@@ -238,9 +367,11 @@ def clear_directory(
     )
 
 
-# ======================================
+# ==================================================
+#
 # Clear Logs
-# ======================================
+#
+# ==================================================
 
 def clear_logs(
     path
@@ -355,9 +486,11 @@ def clear_logs(
     )
 
 
-# ======================================
+# ==================================================
+#
 # Reset MongoDB Raw HTML
-# ======================================
+#
+# ==================================================
 
 def reset_mongodb_raw_html():
 
@@ -447,9 +580,11 @@ def reset_mongodb_raw_html():
     )
 
 
-# ======================================
-# Reset MySQL Database
-# ======================================
+# ==================================================
+#
+# Reset MySQL Database Data
+#
+# ==================================================
 
 def reset_database():
 
@@ -468,36 +603,85 @@ def reset_database():
         print()
 
         print(
-            "========== DATABASE RESET =========="
+            "========== MYSQL DATA RESET =========="
+        )
+
+        print(
+            "IMPORTANT:"
+        )
+
+        print(
+            "  jobs    : KEEP TABLE + DATA"
+        )
+
+        print(
+            "  targets : KEEP TABLE + DATA"
+        )
+
+        print(
+            "  migration_history : KEEP TABLE + DATA"
+        )
+
+        print(
+            "  other tables      : DELETE DATA ONLY"
+        )
+
+        print(
+            "======================================"
         )
 
         # ==================================
-        # FK Child → Parent
+        # Count jobs / targets Before
+        #
+        # 只讀取。
+        #
+        # 不修改。
         # ==================================
 
-        tables = [
+        for table in (
+            "jobs",
+            "targets",
+        ):
 
-            "search_index",
+            try:
 
-            "knowledge_scores",
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {table}
+                    """
+                )
 
-            "archive_versions",
+                count = cursor.fetchone()[0]
 
-            "knowledge_archive",
+                print(
+                    f"[KEEP DATA] "
+                    f"{table}: {count} rows"
+                )
 
-            "ai_tasks",
+            except Exception as e:
 
-            "raw_documents",
-
-            "articles"
-
-        ]
+                print(
+                    f"[VERIFY FAILED] "
+                    f"{table}: {e}"
+                )
 
         # ==================================
-        # Clear Tables
+        # Clear Data Only
+        #
+        # IMPORTANT：
+        #
+        # 只使用 DELETE。
+        #
+        # 不：
+        #
+        # TRUNCATE
+        # DROP
+        # ALTER
+        #
         # ==================================
 
-        for table in tables:
+        for table in MYSQL_DATA_RESET_TABLES:
 
             try:
 
@@ -508,7 +692,8 @@ def reset_database():
                 )
 
                 print(
-                    f"[CLEAR TABLE] {table}"
+                    f"[CLEAR DATA] {table}: "
+                    f"{cursor.rowcount} rows"
                 )
 
             except Exception as e:
@@ -518,31 +703,72 @@ def reset_database():
                     f"{table}: {e}"
                 )
 
+                raise
+
         # ==================================
-        # Reset Auto Increment
+        # Verify Cleared Tables
+        #
         # ==================================
 
-        for table in tables:
+        for table in MYSQL_DATA_RESET_TABLES:
 
             try:
 
                 cursor.execute(
                     f"""
-                    ALTER TABLE {table}
-                    AUTO_INCREMENT = 1
+                    SELECT COUNT(*)
+                    FROM {table}
                     """
                 )
 
+                count = cursor.fetchone()[0]
+
+                if count != 0:
+
+                    raise RuntimeError(
+                        f"MySQL table reset failed: "
+                        f"{table} still has "
+                        f"{count} rows."
+                    )
+
                 print(
-                    f"[RESET ID] {table}"
+                    f"[VERIFY CLEAR] "
+                    f"{table}: 0 rows"
                 )
 
-            except Exception as e:
+            except Exception:
 
-                print(
-                    f"[SKIP ID] "
-                    f"{table}: {e}"
-                )
+                raise
+
+        # ==================================
+        # Verify jobs / targets Still Exist
+        #
+        # 只確認資料數量。
+        #
+        # 不修改。
+        # ==================================
+
+        for table in (
+            "jobs",
+            "targets",
+        ):
+
+            cursor.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM {table}
+                """
+            )
+
+            count_after = (
+                cursor.fetchone()[0]
+            )
+
+            print(
+                f"[VERIFY KEEP] "
+                f"{table}: "
+                f"{count_after} rows"
+            )
 
         # ==================================
         # Commit
@@ -550,13 +776,47 @@ def reset_database():
 
         conn.commit()
 
+        print()
+
         print(
-            "[OK] MySQL database reset committed."
+            "[OK] MySQL data reset committed."
+        )
+
+        print(
+            "[KEEP] jobs table + data"
+        )
+
+        print(
+            "[KEEP] targets table + data"
+        )
+
+        print(
+            "[KEEP] migration_history table + data"
+        )
+
+        print(
+            "[CLEAR] Other MySQL test data only"
+        )
+
+        print(
+            "[KEEP] MySQL Schema"
+        )
+
+        print(
+            "[KEEP] MySQL Indexes"
+        )
+
+        print(
+            "[KEEP] MySQL Foreign Keys"
         )
 
     except Exception:
 
         conn.rollback()
+
+        print(
+            "[ROLLBACK] MySQL data reset rolled back."
+        )
 
         raise
 
@@ -567,9 +827,11 @@ def reset_database():
         conn.close()
 
 
-# ======================================
+# ==================================================
+#
 # Main
-# ======================================
+#
+# ==================================================
 
 def main():
 
@@ -580,7 +842,7 @@ def main():
     )
 
     print(
-        "AutoSearch V4"
+        "AutoSearch V5"
     )
 
     print(
@@ -667,7 +929,7 @@ def main():
 
     print()
     print(
-        "Resetting MySQL Database"
+        "Resetting MySQL Test Data"
     )
     print(
         "-" * 60
@@ -686,7 +948,7 @@ def main():
     )
 
     print(
-        "[PASS] AutoSearch V4 Test Environment Reset Complete."
+        "[PASS] AutoSearch V5 Test Environment Reset Complete."
     )
 
     print(
@@ -694,9 +956,11 @@ def main():
     )
 
 
-# ======================================
+# ==================================================
+#
 # Entry Point
-# ======================================
+#
+# ==================================================
 
 if __name__ == "__main__":
 

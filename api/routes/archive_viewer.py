@@ -57,6 +57,33 @@ Archive Viewer
         v
     Browser Render
 
+MongoDB Snapshot：
+
+    {
+        _id
+        url
+        created_at
+        html
+        content_hash
+        mime_type
+        file_size
+
+        resources
+        ├── css[]
+        │   ├── url
+        │   ├── content
+        │   ├── content_hash
+        │   ├── mime_type
+        │   └── file_size
+        │
+        └── images[]
+            ├── url
+            ├── data
+            ├── content_hash
+            ├── mime_type
+            └── file_size
+    }
+
 重要設計：
 
     1. 本 Router 不使用 api/routes/archive.py。
@@ -120,22 +147,26 @@ Archive Viewer
                    ↓
                Browser Render
 
-    11. 為了讓原網站 HTML 中的相對資源：
+    11. Snapshot HTML 中：
 
-           /images/...
-           images/...
-           ../images/...
-           css/...
-           js/...
+           CSS
+           Image
 
-       維持原本網站的 URL 基準，
+       不再直接依賴真實網站。
 
-       /archive/snapshot 會在 HTML <head>
-       中補入：
+       對應 MongoDB：
 
-           <base href="原始 URL">
+           resources.css[]
+           resources.images[]
+
+       改由 Archive Viewer 自己提供。
 
     12. MongoDB Snapshot 本身不修改。
+
+    13. 原始 HTML 不修改。
+
+    14. Resource URL 只在 HTTP Response
+        動態改寫。
 
 MongoDB：
 
@@ -152,7 +183,6 @@ MongoDB Configuration：
         config.mongo_config.MONGO_URI
         config.mongo_config.MONGO_DATABASE
         config.mongo_config.MONGO_RAW_HTML_COLLECTION
-
 
 不負責：
 
@@ -188,6 +218,12 @@ from html import (
 from typing import (
     Any,
     Optional,
+)
+
+from urllib.parse import (
+    quote,
+    unquote,
+    urljoin,
 )
 
 
@@ -271,18 +307,6 @@ def get_mongo_collection():
     取得 MongoDB Raw HTML Collection。
 
     使用 Lazy Initialization。
-
-    Configuration：
-
-        MONGO_URI
-        MONGO_DATABASE
-        MONGO_RAW_HTML_COLLECTION
-
-    Returns
-    -------
-    Collection
-
-        MongoDB raw_html collection。
     """
 
     global _client
@@ -360,17 +384,6 @@ def normalize_url(
         Markdown Link：
 
             [https://example.com](https://example.com)
-
-    Parameters
-    ----------
-    url:
-        原始 URL。
-
-    Returns
-    -------
-    str | None
-
-        正規化後 URL。
     """
 
     if url is None:
@@ -426,31 +439,6 @@ def normalize_created_at(
     將 created_at 統一成：
 
         timezone-aware UTC datetime。
-
-    支援：
-
-        datetime
-        ISO 8601 string
-        ISO 8601 + Z
-        ISO 8601 + timezone offset
-
-    規則：
-
-        naive datetime
-            ->
-        視為 UTC
-
-        aware datetime
-            ->
-        轉換為 UTC
-
-        naive ISO string
-            ->
-        視為 UTC
-
-        aware ISO string
-            ->
-        轉換為 UTC
     """
 
     if created_at is None:
@@ -545,13 +533,6 @@ def normalize_created_at(
 def format_created_at(
     created_at: Any,
 ) -> str | None:
-    """
-    將 created_at 格式化成 Viewer 使用的 ISO 8601 UTC。
-
-    例如：
-
-        2026-08-29T14:20:00+00:00
-    """
 
     normalized = normalize_created_at(
         created_at
@@ -576,38 +557,12 @@ def find_snapshot_history(
     """
     查詢指定 URL 的所有 Raw HTML Snapshot。
 
-    MongoDB：
+    只查詢 Snapshot Metadata。
 
-        raw_html
+    不載入：
 
-    Query：
-
-        {
-            "url": url
-        }
-
-    回傳：
-
-        [
-            {
-                "version":
-                    "2026-08-29T14:20:00+00:00",
-
-                "created_at":
-                    "2026-08-29T14:20:00+00:00"
-            },
-            ...
-        ]
-
-    排序：
-
-        created_at DESC
-
-    注意：
-
-        本方法只查詢 Snapshot Metadata。
-
-        不載入 Raw HTML。
+        html
+        resources
     """
 
     collection = get_mongo_collection()
@@ -764,13 +719,6 @@ def extract_html(
     """
     從 MongoDB Snapshot 取得 Raw HTML。
 
-    為了兼容既有資料，
-    嘗試幾個常見欄位：
-
-        html
-        raw_html
-        content
-
     優先：
 
         html
@@ -839,12 +787,6 @@ def extract_html(
 def build_snapshot_metadata(
     snapshot: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """
-    建立 Viewer Snapshot Metadata。
-
-    不直接將 MongoDB ObjectId
-    傳給 Template。
-    """
 
     if not snapshot:
 
@@ -909,6 +851,355 @@ def build_snapshot_metadata(
 
 # ============================================================
 #
+# Resource Helpers
+#
+# ============================================================
+
+def get_snapshot_resources(
+    snapshot: dict[str, Any] | None,
+) -> dict[str, list]:
+    """
+    取得 Snapshot Resources。
+
+    MongoDB：
+
+        resources.css[]
+        resources.images[]
+
+    不修改 Snapshot。
+    """
+
+    if not snapshot:
+
+        return {
+            "css": [],
+            "images": [],
+        }
+
+    resources = snapshot.get(
+        "resources"
+    )
+
+    if not isinstance(
+        resources,
+        dict,
+    ):
+
+        return {
+            "css": [],
+            "images": [],
+        }
+
+    css = resources.get(
+        "css"
+    )
+
+    images = resources.get(
+        "images"
+    )
+
+    if not isinstance(
+        css,
+        list,
+    ):
+
+        css = []
+
+    if not isinstance(
+        images,
+        list,
+    ):
+
+        images = []
+
+    return {
+        "css": css,
+        "images": images,
+    }
+
+
+def normalize_resource_url(
+    resource_url: Any,
+) -> str | None:
+    """
+    正規化 MongoDB Resource URL。
+    """
+
+    if resource_url is None:
+
+        return None
+
+    if not isinstance(
+        resource_url,
+        str,
+    ):
+
+        return None
+
+    resource_url = resource_url.strip()
+
+    if not resource_url:
+
+        return None
+
+    return resource_url
+
+
+def resolve_resource_url(
+    resource_url: str,
+    original_url: str,
+) -> str:
+    """
+    將 Resource URL 轉成絕對 URL。
+
+    支援：
+
+        https://...
+        http://...
+        /css/main.css
+        css/main.css
+        ../css/main.css
+    """
+
+    if not resource_url:
+
+        return resource_url
+
+    return urljoin(
+        original_url,
+        resource_url,
+    )
+
+
+# ============================================================
+#
+# Resource Match
+#
+# ============================================================
+
+def find_css_resource(
+    snapshot: dict[str, Any],
+    resource_url: str,
+    original_url: str,
+) -> dict[str, Any] | None:
+    """
+    在 MongoDB：
+
+        resources.css[]
+
+    找到指定 CSS。
+    """
+
+    resources = get_snapshot_resources(
+        snapshot
+    )
+
+    requested_url = resolve_resource_url(
+        resource_url,
+        original_url,
+    )
+
+    for resource in resources["css"]:
+
+        if not isinstance(
+            resource,
+            dict,
+        ):
+
+            continue
+
+        stored_url = normalize_resource_url(
+            resource.get(
+                "url"
+            )
+        )
+
+        if not stored_url:
+
+            continue
+
+        absolute_stored_url = resolve_resource_url(
+            stored_url,
+            original_url,
+        )
+
+        if (
+            absolute_stored_url
+            == requested_url
+        ):
+
+            return resource
+
+        if stored_url == resource_url:
+
+            return resource
+
+    return None
+
+
+def find_image_resource(
+    snapshot: dict[str, Any],
+    resource_url: str,
+    original_url: str,
+) -> dict[str, Any] | None:
+    """
+    在 MongoDB：
+
+        resources.images[]
+
+    找到指定 Image。
+    """
+
+    resources = get_snapshot_resources(
+        snapshot
+    )
+
+    requested_url = resolve_resource_url(
+        resource_url,
+        original_url,
+    )
+
+    for resource in resources["images"]:
+
+        if not isinstance(
+            resource,
+            dict,
+        ):
+
+            continue
+
+        stored_url = normalize_resource_url(
+            resource.get(
+                "url"
+            )
+        )
+
+        if not stored_url:
+
+            continue
+
+        absolute_stored_url = resolve_resource_url(
+            stored_url,
+            original_url,
+        )
+
+        if (
+            absolute_stored_url
+            == requested_url
+        ):
+
+            return resource
+
+        if stored_url == resource_url:
+
+            return resource
+
+    return None
+
+
+# ============================================================
+#
+# Resource Identifier
+#
+# ============================================================
+
+def encode_resource_identifier(
+    resource_url: str,
+) -> str:
+    """
+    將原始 Resource URL 放入 path。
+
+    使用 URL encoding。
+    """
+
+    return quote(
+        resource_url,
+        safe="",
+    )
+
+
+def decode_resource_identifier(
+    resource_url: str,
+) -> str:
+
+    return unquote(
+        resource_url
+    )
+
+
+# ============================================================
+#
+# Resource Data
+#
+# ============================================================
+
+def extract_css_content(
+    resource: dict[str, Any] | None,
+) -> str | bytes | None:
+    """
+    取得 MongoDB CSS content。
+    """
+
+    if not resource:
+
+        return None
+
+    content = resource.get(
+        "content"
+    )
+
+    if isinstance(
+        content,
+        (
+            str,
+            bytes,
+        ),
+    ):
+
+        return content
+
+    return None
+
+
+def extract_image_data(
+    resource: dict[str, Any] | None,
+) -> bytes | str | None:
+    """
+    取得 MongoDB Image data。
+
+    支援：
+
+        bytes
+        str
+
+    注意：
+
+        不改變 MongoDB data。
+    """
+
+    if not resource:
+
+        return None
+
+    data = resource.get(
+        "data"
+    )
+
+    if isinstance(
+        data,
+        (
+            bytes,
+            str,
+        ),
+    ):
+
+        return data
+
+    return None
+
+
+# ============================================================
+#
 # Prepare Snapshot HTML
 #
 # ============================================================
@@ -916,39 +1207,22 @@ def build_snapshot_metadata(
 def prepare_snapshot_html(
     html: str,
     original_url: str,
+    snapshot: dict[str, Any],
+    snapshot_version: str,
 ) -> str:
     """
-    準備 Snapshot HTML 供 Browser 直接 Render。
+    準備 Snapshot HTML 供 Browser Render。
 
-    目的：
+    主要工作：
 
-        讓 MongoDB 儲存的 Raw HTML
-        以原網站 URL 作為 URL Base。
+        1. 保留原始 HTML
+        2. 加入 <base>
+        3. 將 MongoDB CSS URL
+           改成 Archive Viewer CSS URL
+        4. 將 MongoDB Image URL
+           改成 Archive Viewer Image URL
 
-    例如：
-
-        Original URL:
-
-            https://www.tca.org.tw/news_detail.php?n=2449&t=h
-
-        Snapshot HTML：
-
-            <img src="/images/logo.png">
-
-        Browser 將解析成：
-
-            https://www.tca.org.tw/images/logo.png
-
-    注意：
-
-        不修改 MongoDB 中的原始 HTML。
-
-        只在 HTTP Response 前，
-        動態加入 <base href="...">。
-
-    如果 Snapshot 本身已經存在 <base>：
-
-        不重複加入。
+    MongoDB Snapshot 不修改。
     """
 
     if not html:
@@ -958,6 +1232,150 @@ def prepare_snapshot_html(
     if not original_url:
 
         return html
+
+    # ========================================================
+    # Resource Information
+    # ========================================================
+
+    resources = get_snapshot_resources(
+        snapshot
+    )
+
+    css_resources = resources[
+        "css"
+    ]
+
+    image_resources = resources[
+        "images"
+    ]
+
+    # ========================================================
+    # Resource URL Rewriter
+    # ========================================================
+
+    rewritten_html = html
+
+    # ========================================================
+    # CSS
+    # ========================================================
+
+    for resource in css_resources:
+
+        if not isinstance(
+            resource,
+            dict,
+        ):
+
+            continue
+
+        resource_url = normalize_resource_url(
+            resource.get(
+                "url"
+            )
+        )
+
+        if not resource_url:
+
+            continue
+
+        absolute_url = resolve_resource_url(
+            resource_url,
+            original_url,
+        )
+
+        encoded_url = encode_resource_identifier(
+            resource_url
+        )
+
+        archive_css_url = (
+            "/archive/resource/css/"
+            + encoded_url
+            + "?url="
+            + quote(
+                original_url,
+                safe="",
+            )
+            + "&version="
+            + quote(
+                snapshot_version,
+                safe="",
+            )
+        )
+
+        # ----------------------------------------------------
+        # Replace original resource URL
+        # ----------------------------------------------------
+
+        rewritten_html = rewritten_html.replace(
+            absolute_url,
+            archive_css_url,
+        )
+
+        rewritten_html = rewritten_html.replace(
+            resource_url,
+            archive_css_url,
+        )
+
+    # ========================================================
+    # Images
+    # ========================================================
+
+    for resource in image_resources:
+
+        if not isinstance(
+            resource,
+            dict,
+        ):
+
+            continue
+
+        resource_url = normalize_resource_url(
+            resource.get(
+                "url"
+            )
+        )
+
+        if not resource_url:
+
+            continue
+
+        absolute_url = resolve_resource_url(
+            resource_url,
+            original_url,
+        )
+
+        encoded_url = encode_resource_identifier(
+            resource_url
+        )
+
+        archive_image_url = (
+            "/archive/resource/image/"
+            + encoded_url
+            + "?url="
+            + quote(
+                original_url,
+                safe="",
+            )
+            + "&version="
+            + quote(
+                snapshot_version,
+                safe="",
+            )
+        )
+
+        # ----------------------------------------------------
+        # Replace original resource URL
+        # ----------------------------------------------------
+
+        rewritten_html = rewritten_html.replace(
+            absolute_url,
+            archive_image_url,
+        )
+
+        rewritten_html = rewritten_html.replace(
+            resource_url,
+            archive_image_url,
+        )
 
     # ========================================================
     # Escape Base URL
@@ -976,47 +1394,61 @@ def prepare_snapshot_html(
     # Detect Existing Base
     # ========================================================
 
-    lower_html = html.lower()
+    lower_html = rewritten_html.lower()
 
-    if "<base " in lower_html:
+    if "<base " not in lower_html:
 
-        return html
+        # ====================================================
+        # Inject into <head>
+        # ====================================================
 
-    # ========================================================
-    # Inject into <head>
-    # ========================================================
-
-    head_start = lower_html.find(
-        "<head"
-    )
-
-    if head_start != -1:
-
-        head_end = lower_html.find(
-            ">",
-            head_start,
+        head_start = lower_html.find(
+            "<head"
         )
 
-        if head_end != -1:
+        if head_start != -1:
 
-            return (
-                html[:head_end + 1]
-                + "\n"
+            head_end = rewritten_html.find(
+                ">",
+                head_start,
+            )
+
+            if head_end != -1:
+
+                rewritten_html = (
+                    rewritten_html[
+                        :head_end + 1
+                    ]
+                    + "\n"
+                    + base_tag
+                    + "\n"
+                    + rewritten_html[
+                        head_end + 1:
+                    ]
+                )
+
+        else:
+
+            rewritten_html = (
+                "<head>\n"
                 + base_tag
-                + "\n"
-                + html[head_end + 1:]
+                + "\n</head>\n"
+                + rewritten_html
             )
 
     # ========================================================
-    # No <head>
+    # Logging
     # ========================================================
 
-    return (
-        "<head>\n"
-        + base_tag
-        + "\n</head>\n"
-        + html
+    logger.info(
+        "Archive Viewer prepared snapshot HTML: "
+        f"original_url={original_url}, "
+        f"css_resources={len(css_resources)}, "
+        f"image_resources={len(image_resources)}, "
+        f"html_length={len(rewritten_html)}"
     )
+
+    return rewritten_html
 
 
 # ============================================================
@@ -1223,15 +1655,12 @@ def archive_view(
     # ========================================================
     # Viewer UI
     #
-    # IMPORTANT:
+    # HTML 不在這裡載入。
     #
-    # 不再在這裡載入 HTML。
-    #
-    # HTML 改由 iframe：
+    # iframe：
     #
     #     /archive/snapshot
     #
-    # 直接取得。
     # ========================================================
 
     logger.info(
@@ -1263,10 +1692,6 @@ def archive_view(
                 selected_version.get(
                     "created_at"
                 ),
-
-            # =================================================
-            # HTML no longer embedded into Template.
-            # =================================================
 
             "html":
                 None,
@@ -1326,6 +1751,17 @@ def archive_snapshot(
         Raw HTML
              |
              v
+        Resource URL Rewrite
+             |
+             +-------------------------+
+             |                         |
+             v                         v
+        MongoDB CSS               MongoDB Image
+             |                         |
+             v                         v
+        Archive Resource URLs
+             |
+             v
         Inject <base>
              |
              v
@@ -1333,18 +1769,6 @@ def archive_snapshot(
              |
              v
         Browser Render
-
-    注意：
-
-        MongoDB 中的原始 HTML 不修改。
-
-        不使用 srcdoc。
-
-        不經過 Parser。
-
-        不經過 Article。
-
-        不經過 Archive Service。
     """
 
     # ========================================================
@@ -1464,24 +1888,50 @@ def archive_snapshot(
     ).strip()
 
     # ========================================================
+    # Snapshot Version
+    # ========================================================
+
+    snapshot_version = (
+        requested_created_at.isoformat()
+    )
+
+    # ========================================================
     # Prepare HTML
+    #
+    # MongoDB Snapshot 不修改。
+    #
+    # CSS / Image URL：
+    #
+    #     MongoDB
+    #         ↓
+    #     Archive Resource Endpoint
+    #         ↓
+    #     Browser
     # ========================================================
 
     prepared_html = prepare_snapshot_html(
         html,
         original_url,
+        snapshot,
+        snapshot_version,
     )
 
     # ========================================================
     # Logging
     # ========================================================
 
+    resources = get_snapshot_resources(
+        snapshot
+    )
+
     logger.info(
         "Archive Snapshot HTML served: "
         f"url={normalized_url}, "
-        f"version={requested_created_at.isoformat()}, "
+        f"version={snapshot_version}, "
         f"original_url={original_url}, "
-        f"html_length={len(prepared_html)}"
+        f"html_length={len(prepared_html)}, "
+        f"css_resources={len(resources['css'])}, "
+        f"image_resources={len(resources['images'])}"
     )
 
     # ========================================================
@@ -1494,6 +1944,445 @@ def archive_snapshot(
         headers={
             "Content-Disposition": "inline",
             "X-Archive-Snapshot": "true",
+        },
+    )
+
+
+# ============================================================
+#
+# Archive CSS Resource
+#
+# ============================================================
+
+@router.get(
+    "/resource/css/{resource_url:path}",
+    include_in_schema=False,
+)
+def archive_css_resource(
+    resource_url: str,
+    url: str = Query(
+        ...,
+        min_length=1,
+        description="Original article URL.",
+    ),
+    version: str = Query(
+        ...,
+        description=(
+            "Snapshot created_at in ISO 8601 format."
+        ),
+    ),
+):
+    """
+    從 MongoDB：
+
+        resources.css[]
+
+    提供 CSS。
+
+    Flow：
+
+        Browser
+            |
+            v
+        /archive/resource/css/...
+            |
+            v
+        MongoDB Snapshot
+            |
+            v
+        resources.css[]
+            |
+            v
+        content
+            |
+            v
+        text/css
+    """
+
+    # ========================================================
+    # Normalize URL
+    # ========================================================
+
+    normalized_url = normalize_url(
+        url
+    )
+
+    if not normalized_url:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid archive article URL.",
+        )
+
+    # ========================================================
+    # Normalize Version
+    # ========================================================
+
+    requested_created_at = normalize_created_at(
+        version
+    )
+
+    if requested_created_at is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid archive version."
+            ),
+        )
+
+    # ========================================================
+    # Decode Resource URL
+    # ========================================================
+
+    decoded_resource_url = (
+        decode_resource_identifier(
+            resource_url
+        )
+    )
+
+    # ========================================================
+    # Find Snapshot
+    # ========================================================
+
+    try:
+
+        snapshot = find_snapshot(
+            normalized_url,
+            requested_created_at,
+        )
+
+    except Exception:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to query Archive Snapshot."
+            ),
+        )
+
+    if snapshot is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive snapshot not found."
+            ),
+        )
+
+    # ========================================================
+    # Original URL
+    # ========================================================
+
+    original_url = (
+        snapshot.get(
+            "resolved_url"
+        )
+        or snapshot.get(
+            "url"
+        )
+        or normalized_url
+    )
+
+    original_url = str(
+        original_url
+    ).strip()
+
+    # ========================================================
+    # Find CSS
+    # ========================================================
+
+    css_resource = find_css_resource(
+        snapshot,
+        decoded_resource_url,
+        original_url,
+    )
+
+    if css_resource is None:
+
+        logger.warning(
+            "Archive CSS resource not found: "
+            f"url={normalized_url}, "
+            f"version={requested_created_at.isoformat()}, "
+            f"resource={decoded_resource_url}"
+        )
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive CSS resource not found."
+            ),
+        )
+
+    # ========================================================
+    # Extract CSS
+    # ========================================================
+
+    css_content = extract_css_content(
+        css_resource
+    )
+
+    if css_content is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive CSS content not found."
+            ),
+        )
+
+    # ========================================================
+    # MIME Type
+    # ========================================================
+
+    mime_type = (
+        css_resource.get(
+            "mime_type"
+        )
+        or "text/css"
+    )
+
+    mime_type = str(
+        mime_type
+    )
+
+    # ========================================================
+    # Response
+    # ========================================================
+
+    logger.info(
+        "Archive CSS resource served: "
+        f"url={normalized_url}, "
+        f"version={requested_created_at.isoformat()}, "
+        f"resource={decoded_resource_url}"
+    )
+
+    return Response(
+        content=css_content,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": "inline",
+            "X-Archive-Resource": "css",
+        },
+    )
+
+
+# ============================================================
+#
+# Archive Image Resource
+#
+# ============================================================
+
+@router.get(
+    "/resource/image/{resource_url:path}",
+    include_in_schema=False,
+)
+def archive_image_resource(
+    resource_url: str,
+    url: str = Query(
+        ...,
+        min_length=1,
+        description="Original article URL.",
+    ),
+    version: str = Query(
+        ...,
+        description=(
+            "Snapshot created_at in ISO 8601 format."
+        ),
+    ),
+):
+    """
+    從 MongoDB：
+
+        resources.images[]
+
+    提供 Image。
+
+    Flow：
+
+        Browser
+            |
+            v
+        /archive/resource/image/...
+            |
+            v
+        MongoDB Snapshot
+            |
+            v
+        resources.images[]
+            |
+            v
+        data
+            |
+            v
+        image/*
+    """
+
+    # ========================================================
+    # Normalize URL
+    # ========================================================
+
+    normalized_url = normalize_url(
+        url
+    )
+
+    if not normalized_url:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid archive article URL.",
+        )
+
+    # ========================================================
+    # Normalize Version
+    # ========================================================
+
+    requested_created_at = normalize_created_at(
+        version
+    )
+
+    if requested_created_at is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid archive version."
+            ),
+        )
+
+    # ========================================================
+    # Decode Resource URL
+    # ========================================================
+
+    decoded_resource_url = (
+        decode_resource_identifier(
+            resource_url
+        )
+    )
+
+    # ========================================================
+    # Find Snapshot
+    # ========================================================
+
+    try:
+
+        snapshot = find_snapshot(
+            normalized_url,
+            requested_created_at,
+        )
+
+    except Exception:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to query Archive Snapshot."
+            ),
+        )
+
+    if snapshot is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive snapshot not found."
+            ),
+        )
+
+    # ========================================================
+    # Original URL
+    # ========================================================
+
+    original_url = (
+        snapshot.get(
+            "resolved_url"
+        )
+        or snapshot.get(
+            "url"
+        )
+        or normalized_url
+    )
+
+    original_url = str(
+        original_url
+    ).strip()
+
+    # ========================================================
+    # Find Image
+    # ========================================================
+
+    image_resource = find_image_resource(
+        snapshot,
+        decoded_resource_url,
+        original_url,
+    )
+
+    if image_resource is None:
+
+        logger.warning(
+            "Archive Image resource not found: "
+            f"url={normalized_url}, "
+            f"version={requested_created_at.isoformat()}, "
+            f"resource={decoded_resource_url}"
+        )
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive Image resource not found."
+            ),
+        )
+
+    # ========================================================
+    # Extract Image Data
+    # ========================================================
+
+    image_data = extract_image_data(
+        image_resource
+    )
+
+    if image_data is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Archive Image data not found."
+            ),
+        )
+
+    # ========================================================
+    # MIME Type
+    # ========================================================
+
+    mime_type = (
+        image_resource.get(
+            "mime_type"
+        )
+        or "application/octet-stream"
+    )
+
+    mime_type = str(
+        mime_type
+    )
+
+    # ========================================================
+    # Response
+    # ========================================================
+
+    logger.info(
+        "Archive Image resource served: "
+        f"url={normalized_url}, "
+        f"version={requested_created_at.isoformat()}, "
+        f"resource={decoded_resource_url}, "
+        f"mime_type={mime_type}"
+    )
+
+    return Response(
+        content=image_data,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": "inline",
+            "X-Archive-Resource": "image",
         },
     )
 

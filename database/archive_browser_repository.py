@@ -1183,7 +1183,7 @@ class ArchiveBrowserRepository:
     # Composite Archive Search
     # ============================================================
 
-        # ============================================================
+    # ============================================================
     # Composite Archive Search
     # ============================================================
 
@@ -1205,7 +1205,17 @@ class ArchiveBrowserRepository:
         """
         P2.4.2
 
-        Composite Archive Search。
+        Composite Search。
+
+        注意：
+
+            Composite Search 直接搜尋 articles。
+
+            不依賴：
+                archive_versions
+
+            不 JOIN：
+                archive_versions
 
         支援：
 
@@ -1220,18 +1230,6 @@ class ArchiveBrowserRepository:
             importance_min
             importance_max
 
-        URL：
-
-            Optional。
-
-            如果提供 URL，
-            只搜尋 articles.url。
-
-        分頁：
-
-            page
-            page_size
-
         AI 欄位：
 
             articles.ai_summary
@@ -1244,9 +1242,17 @@ class ArchiveBrowserRepository:
             articles.ai_confidence
             articles.ai_status
 
-        不使用：
+        日期：
 
-            ai_analysis
+            優先使用 articles.published
+
+            如果 published 為 NULL，
+            使用 articles.crawl_time。
+
+        分頁：
+
+            page
+            page_size
 
         回傳：
 
@@ -1258,9 +1264,9 @@ class ArchiveBrowserRepository:
         }
         """
 
-        # --------------------------------------------------------
+        # ========================================================
         # Pagination
-        # --------------------------------------------------------
+        # ========================================================
 
         page = self._normalize_page(
             page
@@ -1275,16 +1281,16 @@ class ArchiveBrowserRepository:
             * page_size
         )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Conditions
-        # --------------------------------------------------------
+        # ========================================================
 
         conditions = []
         values = []
 
-        # --------------------------------------------------------
+        # ========================================================
         # Keyword
-        # --------------------------------------------------------
+        # ========================================================
 
         if keyword is not None:
 
@@ -1330,9 +1336,9 @@ class ArchiveBrowserRepository:
                     ]
                 )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Source
-        # --------------------------------------------------------
+        # ========================================================
 
         if source is not None:
 
@@ -1352,9 +1358,9 @@ class ArchiveBrowserRepository:
                     f"%{source}%"
                 )
 
-        # --------------------------------------------------------
+        # ========================================================
         # URL
-        # --------------------------------------------------------
+        # ========================================================
 
         if url is not None:
 
@@ -1374,16 +1380,35 @@ class ArchiveBrowserRepository:
                     f"%{url}%"
                 )
 
-        # --------------------------------------------------------
+        # ========================================================
+        # Article Date Expression
+        #
+        # Priority:
+        #
+        #     published
+        #         ↓
+        #     crawl_time
+        #
+        # 不使用 archive_versions.created_time
+        # ========================================================
+
+        article_date_expression = """
+            COALESCE(
+                a.published,
+                a.crawl_time
+            )
+        """
+
+        # ========================================================
         # Date From
-        # --------------------------------------------------------
+        # ========================================================
 
         if date_from is not None:
 
             conditions.append(
-                """
+                f"""
                 DATE(
-                    av.created_time
+                    {article_date_expression}
                 ) >= %s
                 """
             )
@@ -1392,16 +1417,16 @@ class ArchiveBrowserRepository:
                 date_from
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Date To
-        # --------------------------------------------------------
+        # ========================================================
 
         if date_to is not None:
 
             conditions.append(
-                """
+                f"""
                 DATE(
-                    av.created_time
+                    {article_date_expression}
                 ) <= %s
                 """
             )
@@ -1410,16 +1435,16 @@ class ArchiveBrowserRepository:
                 date_to
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Year
-        # --------------------------------------------------------
+        # ========================================================
 
         if year is not None:
 
             conditions.append(
-                """
+                f"""
                 YEAR(
-                    av.created_time
+                    {article_date_expression}
                 ) = %s
                 """
             )
@@ -1428,16 +1453,16 @@ class ArchiveBrowserRepository:
                 year
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Month
-        # --------------------------------------------------------
+        # ========================================================
 
         if month is not None:
 
             conditions.append(
-                """
+                f"""
                 MONTH(
-                    av.created_time
+                    {article_date_expression}
                 ) = %s
                 """
             )
@@ -1446,9 +1471,9 @@ class ArchiveBrowserRepository:
                 month
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # AI Category
-        # --------------------------------------------------------
+        # ========================================================
 
         if category is not None:
 
@@ -1468,9 +1493,9 @@ class ArchiveBrowserRepository:
                     f"%{category}%"
                 )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Importance Min
-        # --------------------------------------------------------
+        # ========================================================
 
         if importance_min is not None:
 
@@ -1484,9 +1509,9 @@ class ArchiveBrowserRepository:
                 importance_min
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Importance Max
-        # --------------------------------------------------------
+        # ========================================================
 
         if importance_max is not None:
 
@@ -1500,9 +1525,9 @@ class ArchiveBrowserRepository:
                 importance_max
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # WHERE
-        # --------------------------------------------------------
+        # ========================================================
 
         where_sql = ""
 
@@ -1516,9 +1541,9 @@ class ArchiveBrowserRepository:
                 )
             )
 
-        # --------------------------------------------------------
+        # ========================================================
         # Connection
-        # --------------------------------------------------------
+        # ========================================================
 
         conn = get_connection()
 
@@ -1530,16 +1555,17 @@ class ArchiveBrowserRepository:
 
             # ====================================================
             # Count
+            #
+            # 只計算 articles
+            #
+            # 不使用 archive_versions
             # ====================================================
 
             count_sql = f"""
                 SELECT
                     COUNT(*) AS total
 
-                FROM archive_versions av
-
-                INNER JOIN articles a
-                    ON a.id = av.article_id
+                FROM articles a
 
                 {where_sql}
             """
@@ -1563,21 +1589,16 @@ class ArchiveBrowserRepository:
 
             # ====================================================
             # Results
+            #
+            # 只查 articles
+            #
+            # 不 JOIN archive_versions
             # ====================================================
 
             result_sql = f"""
                 SELECT
 
-                    av.id,
-                    av.article_id,
-                    av.raw_document_id,
-                    av.version_number,
-                    av.file_hash,
-                    av.storage_path,
-                    av.file_size,
-                    av.mime_type,
-                    av.created_time,
-
+                    a.id,
                     a.document_id,
                     a.keyword,
                     a.title,
@@ -1597,15 +1618,15 @@ class ArchiveBrowserRepository:
                     a.ai_confidence,
                     a.ai_status
 
-                FROM archive_versions av
-
-                INNER JOIN articles a
-                    ON a.id = av.article_id
+                FROM articles a
 
                 {where_sql}
 
                 ORDER BY
-                    av.created_time DESC
+                    COALESCE(
+                        a.published,
+                        a.crawl_time
+                    ) DESC
 
                 LIMIT %s
                 OFFSET %s
@@ -1628,6 +1649,10 @@ class ArchiveBrowserRepository:
             results = (
                 cursor.fetchall()
             )
+
+            # ====================================================
+            # Return
+            # ====================================================
 
             return {
                 "results": results,

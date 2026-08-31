@@ -4,625 +4,775 @@
 
 <head>
 
-    <meta charset="UTF-8">
+```
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>
-        Archive Viewer
-    </title>
+<title>
+    {{ title or "Article Archive" }}
+</title>
 
-    <style>
+<style>
 
-        * {
-            box-sizing: border-box;
-        }
+    /* ==================================================
+       Global
+    ================================================== */
 
-        html,
-        body {
-            margin: 0;
-            padding: 0;
+    * {
+        box-sizing: border-box;
+    }
 
-            font-family:
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                "Microsoft JhengHei",
-                Arial,
-                sans-serif;
+    html,
+    body {
+        margin: 0;
+        padding: 0;
 
-            background: #f5f6f8;
-            color: #222;
-        }
+        font-family:
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            "Microsoft JhengHei",
+            Arial,
+            sans-serif;
 
-        /* ==================================================
-           Main Container
-        ================================================== */
+        background: #f5f6f8;
+        color: #222;
+    }
+
+
+    /* ==================================================
+       Main Container
+    ================================================== */
+
+    .container {
+        width: 100%;
+        max-width: 1400px;
+
+        margin: 0 auto;
+
+        padding: 24px;
+    }
+
+
+    /* ==================================================
+       Archive Header
+    ================================================== */
+
+    .header {
+        background: #ffffff;
+
+        border: 1px solid #ddd;
+        border-radius: 10px;
+
+        padding: 20px;
+
+        margin-bottom: 20px;
+    }
+
+    .header h1 {
+        margin: 0 0 16px 0;
+
+        font-size: 26px;
+        font-weight: 600;
+
+        color: #222;
+    }
+
+
+    /* ==================================================
+       Original URL
+    ================================================== */
+
+    .url-section {
+        margin-bottom: 20px;
+    }
+
+    .label {
+        display: block;
+
+        margin-bottom: 8px;
+
+        font-size: 14px;
+        font-weight: 600;
+
+        color: #666;
+    }
+
+    .url {
+        display: block;
+
+        padding: 12px;
+
+        background: #f7f7f7;
+
+        border: 1px solid #ddd;
+        border-radius: 6px;
+
+        word-break: break-all;
+
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    .url a {
+        color: #2563eb;
+
+        text-decoration: none;
+
+        overflow-wrap: anywhere;
+    }
+
+    .url a:hover {
+        text-decoration: underline;
+    }
+
+
+    /* ==================================================
+       Snapshot History
+    ================================================== */
+
+    .history-section {
+        margin-top: 20px;
+    }
+
+    .history-title {
+        margin-bottom: 10px;
+
+        font-size: 18px;
+        font-weight: 600;
+
+        color: #222;
+    }
+
+    .history {
+        display: flex;
+
+        flex-wrap: wrap;
+
+        gap: 8px;
+    }
+
+
+    /* ==================================================
+       Snapshot Button
+    ================================================== */
+
+    .snapshot {
+        display: inline-flex;
+
+        align-items: center;
+
+        gap: 8px;
+
+        padding: 9px 13px;
+
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+
+        background: #ffffff;
+
+        color: #333;
+
+        text-decoration: none;
+
+        font-size: 14px;
+
+        transition:
+            background 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    .snapshot:hover {
+        background: #f0f4ff;
+
+        border-color: #8aa4e8;
+    }
+
+    .snapshot.selected {
+        background: #e9efff;
+
+        border-color: #5276d7;
+
+        font-weight: 600;
+    }
+
+    .snapshot-marker {
+        display: inline-block;
+
+        min-width: 16px;
+
+        font-size: 15px;
+        line-height: 1;
+
+        text-align: center;
+    }
+
+    .snapshot-date {
+        line-height: 1.4;
+
+        word-break: break-word;
+    }
+
+    .latest {
+        font-size: 12px;
+
+        color: #2563eb;
+
+        font-weight: 600;
+
+        white-space: nowrap;
+    }
+
+
+    /* ==================================================
+       No Snapshots
+    ================================================== */
+
+    .no-snapshots {
+        padding: 18px;
+
+        border: 1px solid #ddd;
+        border-radius: 6px;
+
+        background: #fafafa;
+
+        color: #666;
+
+        font-size: 14px;
+        line-height: 1.7;
+    }
+
+
+    /* ==================================================
+       Viewer
+    ================================================== */
+
+    .viewer {
+        background: #ffffff;
+
+        border: 1px solid #ddd;
+        border-radius: 10px;
+
+        overflow: hidden;
+    }
+
+
+    /* ==================================================
+       Viewer Header
+    ================================================== */
+
+    .viewer-header {
+        display: flex;
+
+        align-items: center;
+
+        min-height: 52px;
+
+        padding: 14px 20px;
+
+        border-bottom: 1px solid #ddd;
+
+        background: #fafafa;
+
+        font-size: 16px;
+        font-weight: 600;
+
+        color: #222;
+    }
+
+    .viewer-header-label {
+        margin-right: 6px;
+    }
+
+    .viewer-header-date {
+        color: #555;
+
+        font-weight: 500;
+    }
+
+
+    /* ==================================================
+       Viewer Body
+    ================================================== */
+
+    .viewer-body {
+        width: 100%;
+
+        min-height: 700px;
+
+        background: #ffffff;
+    }
+
+
+    /* ==================================================
+       Archived HTML Frame
+    ================================================== */
+
+    .html-frame {
+        display: block;
+
+        width: 100%;
+
+        min-height: 900px;
+
+        border: 0;
+
+        background: #ffffff;
+    }
+
+
+    /* ==================================================
+       Empty Viewer
+    ================================================== */
+
+    .viewer-empty {
+        display: flex;
+
+        align-items: center;
+        justify-content: center;
+
+        min-height: 700px;
+
+        padding: 40px;
+
+        text-align: center;
+
+        color: #888;
+    }
+
+    .viewer-empty-content {
+        width: 100%;
+
+        max-width: 500px;
+    }
+
+    .viewer-empty-title {
+        margin-bottom: 10px;
+
+        font-size: 20px;
+        font-weight: 600;
+
+        color: #555;
+    }
+
+    .viewer-empty-text {
+        font-size: 14px;
+
+        line-height: 1.7;
+
+        color: #888;
+    }
+
+
+    /* ==================================================
+       Error
+    ================================================== */
+
+    .error {
+        padding: 18px;
+
+        border: 1px solid #e0b4b4;
+        border-radius: 6px;
+
+        background: #fff5f5;
+
+        color: #a33;
+
+        line-height: 1.6;
+    }
+
+
+    /* ==================================================
+       Responsive
+    ================================================== */
+
+    @media (max-width: 768px) {
 
         .container {
-            width: 100%;
-            max-width: 1400px;
-
-            margin: 0 auto;
-
-            padding: 24px;
+            padding: 12px;
         }
 
-        /* ==================================================
-           Header
-        ================================================== */
-
         .header {
-            background: #ffffff;
-
-            border: 1px solid #ddd;
-            border-radius: 10px;
-
-            padding: 20px;
-
-            margin-bottom: 20px;
+            padding: 15px;
         }
 
         .header h1 {
-            margin: 0 0 16px 0;
-
-            font-size: 26px;
-            font-weight: 600;
-        }
-
-        /* ==================================================
-           Original URL
-        ================================================== */
-
-        .url-section {
-            margin-bottom: 20px;
-        }
-
-        .label {
-            display: block;
-
-            margin-bottom: 8px;
-
-            font-size: 14px;
-            font-weight: 600;
-
-            color: #666;
-        }
-
-        .url {
-            display: block;
-
-            padding: 12px;
-
-            background: #f7f7f7;
-
-            border: 1px solid #ddd;
-            border-radius: 6px;
-
-            word-break: break-all;
-
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        .url a {
-            color: #2563eb;
-            text-decoration: none;
-        }
-
-        .url a:hover {
-            text-decoration: underline;
-        }
-
-        /* ==================================================
-           Snapshot History
-        ================================================== */
-
-        .history-section {
-            margin-top: 20px;
-        }
-
-        .history-title {
-            margin-bottom: 10px;
-
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 22px;
         }
 
         .history {
             display: flex;
 
-            flex-wrap: wrap;
-
-            gap: 8px;
+            flex-direction: column;
         }
-
-        /* ==================================================
-           Snapshot Button
-        ================================================== */
 
         .snapshot {
-            display: inline-flex;
+            width: 100%;
 
-            align-items: center;
-
-            gap: 8px;
-
-            padding: 9px 13px;
-
-            border: 1px solid #d0d0d0;
-            border-radius: 6px;
-
-            background: #ffffff;
-
-            color: #333;
-
-            text-decoration: none;
-
-            font-size: 14px;
-
-            transition:
-                background 0.15s ease,
-                border-color 0.15s ease;
-        }
-
-        .snapshot:hover {
-            background: #f0f4ff;
-
-            border-color: #8aa4e8;
-        }
-
-        .snapshot.selected {
-            background: #e9efff;
-
-            border-color: #5276d7;
-
-            font-weight: 600;
-        }
-
-        .snapshot-marker {
-            font-size: 15px;
-            line-height: 1;
-        }
-
-        .latest {
-            font-size: 12px;
-
-            color: #2563eb;
-
-            font-weight: 600;
-        }
-
-        /* ==================================================
-           Empty Snapshot
-        ================================================== */
-
-        .no-snapshots {
-            padding: 18px;
-
-            border: 1px solid #ddd;
-            border-radius: 6px;
-
-            background: #fafafa;
-
-            color: #666;
-
-            font-size: 14px;
-        }
-
-        /* ==================================================
-           Viewer
-        ================================================== */
-
-        .viewer {
-            background: #ffffff;
-
-            border: 1px solid #ddd;
-            border-radius: 10px;
-
-            overflow: hidden;
-        }
-
-        .viewer-header {
-            padding: 14px 20px;
-
-            border-bottom: 1px solid #ddd;
-
-            background: #fafafa;
-
-            font-size: 16px;
-            font-weight: 600;
+            justify-content: flex-start;
         }
 
         .viewer-body {
-            width: 100%;
-
-            min-height: 700px;
-
-            background: #ffffff;
+            min-height: 600px;
         }
-
-        /* ==================================================
-           Snapshot HTML Frame
-        ================================================== */
 
         .html-frame {
-            width: 100%;
-
-            min-height: 900px;
-
-            border: 0;
-
-            display: block;
-
-            background: #ffffff;
+            min-height: 600px;
         }
 
-        /* ==================================================
-           Initial State
-        ================================================== */
+        .viewer-header {
+            padding: 12px 15px;
 
-        .viewer-empty {
-            min-height: 700px;
-
-            display: flex;
-
-            align-items: center;
-            justify-content: center;
-
-            text-align: center;
-
-            padding: 40px;
-
-            color: #888;
+            font-size: 15px;
         }
+    }
 
-        .viewer-empty-content {
-            max-width: 500px;
-        }
-
-        .viewer-empty-title {
-            margin-bottom: 10px;
-
-            font-size: 20px;
-
-            font-weight: 600;
-
-            color: #555;
-        }
-
-        .viewer-empty-text {
-            font-size: 14px;
-
-            line-height: 1.7;
-
-            color: #888;
-        }
-
-        /* ==================================================
-           Error
-        ================================================== */
-
-        .error {
-            padding: 18px;
-
-            border: 1px solid #e0b4b4;
-            border-radius: 6px;
-
-            background: #fff5f5;
-
-            color: #a33;
-
-            line-height: 1.6;
-        }
-
-        /* ==================================================
-           Responsive
-        ================================================== */
-
-        @media (max-width: 768px) {
-
-            .container {
-                padding: 12px;
-            }
-
-            .header {
-                padding: 15px;
-            }
-
-            .header h1 {
-                font-size: 22px;
-            }
-
-            .history {
-                display: flex;
-
-                flex-direction: column;
-            }
-
-            .snapshot {
-                width: 100%;
-
-                justify-content: flex-start;
-            }
-
-            .viewer-body,
-            .html-frame {
-                min-height: 600px;
-            }
-        }
-
-    </style>
+</style>
+```
 
 </head>
-
 
 <body>
 
 <div class="container">
 
+```
+<!-- ==================================================
+     Archive Header
+================================================== -->
+
+<section class="header">
+
+    <h1>
+        {{ title or "Article Archive" }}
+    </h1>
+
 
     <!-- ==================================================
-         Archive Header
+         Original URL
     ================================================== -->
 
-    <section class="header">
+    <div class="url-section">
 
-        <h1>
-            Article Archive
-        </h1>
+        <span class="label">
+            原始 URL
+        </span>
+
+        <div class="url">
+
+            {% if url %}
+
+                <a
+                    href="{{ url }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    {{ url }}
+                </a>
+
+            {% else %}
+
+                —
+
+            {% endif %}
+
+        </div>
+
+    </div>
 
 
-        <!-- ==================================================
-             Original URL
-        ================================================== -->
+    <!-- ==================================================
+         Snapshot History
+         
+         archive_viewer.py:
+         
+             versions = [
+                 {
+                     "version": "...",
+                     "created_at": "..."
+                 }
+             ]
+         
+         versions 已經按照 created_at DESC 排序。
+         
+         因此：
+         
+             loop.first = 最新 Snapshot
+    ================================================== -->
 
-        <div class="url-section">
+    <div class="history-section">
 
-            <span class="label">
-                原始 URL
-            </span>
+        <div class="history-title">
+            歷史版本
+        </div>
 
-            <div class="url">
 
-                {% if url %}
+        {% if versions %}
+
+            <div class="history">
+
+                {% for item in versions %}
+
+                    {% set version_value = item.get("version") %}
+                    {% set created_at = item.get("created_at") %}
+
 
                     <a
-                        href="{{ url }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        class="snapshot{% if selected_version == version_value %} selected{% endif %}"
+                        href="/archive/view?url={{ url | urlencode }}&version={{ version_value | urlencode }}"
+                        title="查看 Snapshot {{ created_at or version_value }}"
                     >
-                        {{ url }}
+
+                        <span class="snapshot-marker">
+
+                            {% if selected_version == version_value %}
+
+                                ●
+
+                            {% else %}
+
+                                ○
+
+                            {% endif %}
+
+                        </span>
+
+
+                        <span class="snapshot-date">
+
+                            {% if created_at %}
+
+                                {{ created_at }}
+
+                            {% elif version_value %}
+
+                                {{ version_value }}
+
+                            {% else %}
+
+                                —
+
+                            {% endif %}
+
+                        </span>
+
+
+                        {% if loop.first %}
+
+                            <span class="latest">
+                                ← 最新
+                            </span>
+
+                        {% endif %}
+
                     </a>
 
-                {% else %}
-
-                    —
-
-                {% endif %}
+                {% endfor %}
 
             </div>
 
-        </div>
 
+        {% else %}
 
-        <!-- ==================================================
-             Snapshot History
-        ================================================== -->
+            <div class="no-snapshots">
 
-        <div class="history-section">
+                No Snapshots
 
-            <div class="history-title">
-                歷史版本
+                <br>
+
+                This article has no archived HTML snapshots.
+
             </div>
 
+        {% endif %}
 
-            {% if versions %}
+    </div>
 
-                <div class="history">
-
-                    {% for item in versions %}
-
-                        {% set version_value = item.get("version") %}
-
-                        {% set created_at = item.get("created_at") %}
+</section>
 
 
-                        <a
-                            class="snapshot
-                            {% if selected_version == version_value %}
-                                selected
-                            {% endif %}
-                            "
-                            href="/archive/view?url={{ url | urlencode }}&version={{ version_value | urlencode }}"
-                        >
+<!-- ==================================================
+     Viewer
+================================================== -->
 
-
-                            <span class="snapshot-marker">
-
-                                {% if selected_version == version_value %}
-
-                                    ●
-
-                                {% else %}
-
-                                    ○
-
-                                {% endif %}
-
-                            </span>
-
-
-                            <span>
-
-                                {% if created_at %}
-
-                                    {{ created_at }}
-
-                                {% else %}
-
-                                    {{ version_value }}
-
-                                {% endif %}
-
-                            </span>
-
-
-                            {% if loop.first %}
-
-                                <span class="latest">
-                                    ← 最新
-                                </span>
-
-                            {% endif %}
-
-
-                        </a>
-
-                    {% endfor %}
-
-                </div>
-
-
-            {% else %}
-
-                <div class="no-snapshots">
-
-                    No Snapshots
-
-                    <br>
-
-                    This article has no archived HTML snapshots.
-
-                </div>
-
-            {% endif %}
-
-        </div>
-
-    </section>
-
+<section class="viewer">
 
 
     <!-- ==================================================
-         Viewer
+         Viewer Header
+         
+         初次進入：
+         
+             selected_version = None
+         
+         顯示：
+         
+             網頁內容
+         
+         選擇 Snapshot：
+         
+             selected_version != None
+         
+         顯示：
+         
+             Snapshot — created_at
     ================================================== -->
 
-    <section class="viewer">
+    <div class="viewer-header">
 
+        {% if selected_version %}
 
-        <div class="viewer-header">
-
-            {% if selected_version %}
-
+            <span class="viewer-header-label">
                 Snapshot
+            </span>
 
-                {% if selected_created_at %}
+            {% if selected_created_at %}
 
-                    —
-                    {{ selected_created_at }}
-
-                {% endif %}
-
-            {% else %}
-
-                網頁內容
+                <span class="viewer-header-date">
+                    — {{ selected_created_at }}
+                </span>
 
             {% endif %}
 
-        </div>
+        {% else %}
+
+            網頁內容
+
+        {% endif %}
+
+    </div>
 
 
+    <!-- ==================================================
+         Viewer Body
+    ================================================== -->
 
-        <div class="viewer-body">
-
-
-            <!-- ==================================================
-                 Snapshot Selected
-            ================================================== -->
-
-            {% if selected_version %}
-
-                <iframe
-                    class="html-frame"
-
-                    src="/archive/snapshot?url={{ url | urlencode }}&version={{ selected_version | urlencode }}"
-
-                    title="Archived HTML"
-
-                    loading="eager"
-
-                    sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
-                >
-                </iframe>
+    <div class="viewer-body">
 
 
-            <!-- ==================================================
-                 Initial Viewer
-            ================================================== -->
+        <!-- ==================================================
+             Selected Snapshot
+             
+             archive_viewer.py:
+             
+                 /archive/view
+                     |
+                     v
+                 viewer.html
+                     |
+                     v
+                 iframe
+                     |
+                     v
+                 /archive/snapshot
+                     |
+                     v
+                 MongoDB raw_html
+             
+             注意：
+             
+                 不使用 srcdoc
+                 
+                 不直接把 html 放進模板
+                 
+                 不直接存取 MongoDB
+        ================================================== -->
 
-            {% elif versions %}
+        {% if selected_version %}
 
-                <div class="viewer-empty">
+            <iframe
+                class="html-frame"
+                src="/archive/snapshot?url={{ url | urlencode }}&version={{ selected_version | urlencode }}"
+                title="Archived HTML Snapshot"
+                loading="eager"
+                sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+            >
+            </iframe>
 
-                    <div class="viewer-empty-content">
 
-                        <div class="viewer-empty-title">
-                            選擇歷史版本
-                        </div>
+        <!-- ==================================================
+             Initial Viewer
+             
+             有 Snapshot，
+             但尚未指定 version。
+             
+             archive_viewer.py：
+             
+                 selected_version = None
+                 html = None
+             
+             所以這裡只顯示提示，
+             不載入 Snapshot HTML。
+        ================================================== -->
 
-                        <div class="viewer-empty-text">
+        {% elif versions %}
 
-                            請從上方「歷史版本」
-                            選擇一個 Snapshot。
+            <div class="viewer-empty">
 
-                            <br>
+                <div class="viewer-empty-content">
 
-                            選擇後將直接載入 MongoDB
-                            儲存的原始 HTML。
+                    <div class="viewer-empty-title">
+                        選擇歷史版本
+                    </div>
 
-                        </div>
+                    <div class="viewer-empty-text">
+
+                        請從上方「歷史版本」
+                        選擇一個 Snapshot。
+
+                        <br>
+
+                        選擇後將透過 Archive Viewer
+                        載入 MongoDB 儲存的原始 HTML。
 
                     </div>
 
                 </div>
 
+            </div>
 
-            <!-- ==================================================
-                 No Snapshot
-            ================================================== -->
 
-            {% else %}
+        <!-- ==================================================
+             No Snapshot
+             
+             archive_viewer.py：
+             
+                 versions = []
+             
+             表示 MongoDB 沒有任何 Snapshot。
+        ================================================== -->
 
-                <div class="viewer-empty">
+        {% else %}
 
-                    <div class="viewer-empty-content">
+            <div class="viewer-empty">
 
-                        <div class="viewer-empty-title">
-                            No Archived Content
-                        </div>
+                <div class="viewer-empty-content">
 
-                        <div class="viewer-empty-text">
+                    <div class="viewer-empty-title">
+                        No Archived Content
+                    </div>
 
-                            此 URL 沒有可用的
-                            Archive Snapshot。
+                    <div class="viewer-empty-text">
 
-                        </div>
+                        此 URL 沒有可用的
+                        Archive Snapshot。
 
                     </div>
 
                 </div>
 
-            {% endif %}
+            </div>
 
+        {% endif %}
 
-        </div>
+    </div>
 
-    </section>
-
+</section>
+```
 
 </div>
 

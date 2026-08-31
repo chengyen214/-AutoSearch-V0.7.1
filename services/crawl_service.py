@@ -24,6 +24,8 @@ Crawl Service
             ↓
         Content Hash
             ↓
+        Resource Download
+            ↓
         CrawlResult
             ↓
         RawHTMLRepository
@@ -38,14 +40,34 @@ Crawl Service
             ↓
         MySQL Article
 
+
+Raw HTML MongoDB Structure：
+
+    raw_html
+    ├── url
+    ├── html
+    ├── content_hash
+    ├── resolved_url
+    ├── article_id
+    ├── document_id
+    ├── created_at
+    ├── updated_at
+    │
+    └── resources
+        ├── css[]
+        └── images[]
+
+
 責任：
 
     - Crawl URL
-    - 呼叫底層 crawler.download()
+    - 呼叫 crawler.download()
+    - 呼叫 crawler.download_resources()
     - 保留原始 URL
     - 保留 Redirect 後 URL
     - 取得 Raw HTML
     - 計算 Raw HTML Content Hash
+    - 取得 CSS / Image Resources
     - 建立 CrawlResult
     - 將成功 CrawlResult 保存至 MongoDB
     - Crawl Error Handling
@@ -69,12 +91,19 @@ Crawl Service
     - AI
     - AI Task
 
+
 設計原則：
 
     crawler.py
         負責：
 
-            URL → HTTP → HTML
+            URL
+             ↓
+            HTTP
+             ↓
+            HTML
+             ↓
+            Resource Download
 
     CrawlService
         負責：
@@ -84,6 +113,8 @@ Crawl Service
             Crawl
                 ↓
             Hash
+                ↓
+            Resources
                 ↓
             CrawlResult
                 ↓
@@ -103,6 +134,7 @@ Crawl Service
                 ↓
             Parsed Article
 
+
 Hash Policy：
 
     CrawlService
@@ -113,37 +145,8 @@ Hash Policy：
 
     content_hash 是 Raw HTML Content Identity。
 
-    Archive Duplicate Detection：
 
-        URL
-        +
-        content_hash
-
-    由 ArchiveService 負責。
-
-重要：
-
-    CrawlService 不需要：
-
-        keyword
-        SQL
-        article_id
-        document_id
-        target repository
-
-    因為 Crawl 的最小輸入只有：
-
-        URL
-
-MongoDB Policy：
-
-    Crawl 成功後：
-
-        CrawlResult
-            ↓
-        RawHTMLRepository.save_crawl_result()
-            ↓
-        MongoDB
+MongoDB Metadata Policy：
 
     Crawl 階段：
 
@@ -159,6 +162,7 @@ MongoDB Policy：
         article_id
         document_id
 
+
 Repository Save Failure：
 
     MongoDB 儲存失敗：
@@ -170,6 +174,7 @@ Repository Save Failure：
         CrawlResult.success
             仍代表 HTTP Crawl 是否成功。
 
+
 Pipeline：
 
     SearchResult
@@ -178,11 +183,17 @@ Pipeline：
           ↓
     CrawlService
           ↓
+    crawler.resolve_url()
+          ↓
     crawler.download()
           ↓
        Raw HTML
           ↓
     SHA-256 Hash
+          ↓
+    crawler.download_resources()
+          ↓
+    CSS / Images
           ↓
      CrawlResult
           ↓
@@ -227,7 +238,9 @@ from typing import (
 from crawler.crawler import (
     download,
     resolve_url,
+    download_resources,
 )
+
 
 # ==================================================
 #
@@ -268,6 +281,9 @@ class CrawlResult:
         - Redirect 後 URL
         - Raw HTML
         - Content Hash
+        - Article ID
+        - Document ID
+        - Resources
         - Success
         - Error
         - Crawl Time
@@ -308,6 +324,40 @@ class CrawlResult:
     content_hash: Optional[str] = None
 
     # --------------------------------------------------
+    # Article ID
+    #
+    # Crawl 階段尚未建立 Article。
+    # 因此預設 None。
+    # --------------------------------------------------
+
+    article_id: Optional[int] = None
+
+    # --------------------------------------------------
+    # Document ID
+    #
+    # Crawl 階段尚未建立 Article Document Identity。
+    # 因此預設 None。
+    # --------------------------------------------------
+
+    document_id: Optional[str] = None
+
+    # --------------------------------------------------
+    # Resources
+    #
+    # {
+    #     "css": [],
+    #     "images": []
+    # }
+    # --------------------------------------------------
+
+    resources: dict = field(
+        default_factory=lambda: {
+            "css": [],
+            "images": [],
+        }
+    )
+
+    # --------------------------------------------------
     # Success
     # --------------------------------------------------
 
@@ -346,6 +396,8 @@ class CrawlResult:
             and self.html
         )
 
+    # ==================================================
+
     @property
     def has_hash(self):
         """
@@ -355,6 +407,43 @@ class CrawlResult:
         return bool(
             self.content_hash
         )
+
+    # ==================================================
+
+    @property
+    def has_resources(self):
+        """
+        判斷是否存在 Resource。
+
+        注意：
+
+            沒有 Resource
+            不代表 Crawl Failure。
+
+        某些 HTML 本身可能沒有
+        CSS 或 Image。
+        """
+
+        if not self.resources:
+
+            return False
+
+        css = self.resources.get(
+            "css",
+            [],
+        )
+
+        images = self.resources.get(
+            "images",
+            [],
+        )
+
+        return bool(
+            css
+            or images
+        )
+
+    # ==================================================
 
     @property
     def final_url(self):
@@ -391,6 +480,8 @@ class CrawlService:
          ↓
         SHA-256
          ↓
+        Resources
+         ↓
         CrawlResult
          ↓
         RawHTMLRepository
@@ -405,17 +496,10 @@ class CrawlService:
         AI
         Archive Business Logic
 
-    注意：
+    Crawl 階段：
 
-        Crawl 階段尚未建立 Article。
-
-        因此：
-
-            article_id = None
-            document_id = None
-
-        RawHTMLRepository 已支援
-        CrawlResult 直接保存。
+        article_id = None
+        document_id = None
     """
 
     # ==================================================
@@ -428,6 +512,7 @@ class CrawlService:
         self,
         downloader=None,
         url_resolver=None,
+        resource_downloader=None,
         raw_html_repository=None,
         save_raw_html=True,
     ):
@@ -453,6 +538,14 @@ class CrawlService:
 
                 crawler.resolve_url
 
+        resource_downloader :
+
+            CSS / Image Resource Downloader。
+
+            預設：
+
+                crawler.download_resources
+
         raw_html_repository :
 
             Raw HTML Repository。
@@ -467,16 +560,6 @@ class CrawlService:
             將 Raw HTML 保存至 MongoDB。
 
             預設 True。
-
-            Pipeline：
-
-                Crawl
-                  ↓
-                CrawlResult
-                  ↓
-                RawHTMLRepository
-                  ↓
-                MongoDB
         """
 
         # --------------------------------------------------
@@ -517,6 +600,29 @@ class CrawlService:
 
         self.url_resolver = (
             url_resolver
+        )
+
+        # --------------------------------------------------
+        # Resource Downloader
+        # --------------------------------------------------
+
+        if resource_downloader is None:
+
+            resource_downloader = (
+                download_resources
+            )
+
+        if not callable(
+            resource_downloader
+        ):
+
+            raise TypeError(
+                "resource_downloader "
+                "must be callable"
+            )
+
+        self.resource_downloader = (
+            resource_downloader
         )
 
         # --------------------------------------------------
@@ -568,6 +674,8 @@ class CrawlService:
              ↓
             SHA-256
              ↓
+            download_resources()
+             ↓
             CrawlResult
              ↓
             RawHTMLRepository
@@ -585,16 +693,6 @@ class CrawlService:
         -------
 
         CrawlResult
-
-        注意：
-
-            Crawl 成功後會自動保存
-            Raw HTML Snapshot。
-
-            Crawl 階段：
-
-                article_id=None
-                document_id=None
         """
 
         # --------------------------------------------------
@@ -612,14 +710,32 @@ class CrawlService:
         except Exception as exc:
 
             return CrawlResult(
+
                 url=str(
                     url
                 ),
+
                 resolved_url=None,
+
                 html=None,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
-                error=str(exc),
+
+                error=str(
+                    exc
+                ),
+
             )
 
         # --------------------------------------------------
@@ -660,7 +776,7 @@ class CrawlService:
             )
 
         # --------------------------------------------------
-        # Download
+        # Download HTML
         # --------------------------------------------------
 
         try:
@@ -680,12 +796,30 @@ class CrawlService:
             )
 
             return CrawlResult(
+
                 url=normalized_url,
+
                 resolved_url=resolved_url,
+
                 html=None,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
-                error=str(exc),
+
+                error=str(
+                    exc
+                ),
+
             )
 
         # --------------------------------------------------
@@ -700,12 +834,30 @@ class CrawlService:
             )
 
             return CrawlResult(
+
                 url=normalized_url,
+
                 resolved_url=resolved_url,
+
                 html=None,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
-                error="Failed to download HTML",
+
+                error=(
+                    "Failed to download HTML"
+                ),
+
             )
 
         # --------------------------------------------------
@@ -724,15 +876,31 @@ class CrawlService:
             )
 
             return CrawlResult(
+
                 url=normalized_url,
+
                 resolved_url=resolved_url,
+
                 html=None,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
+
                 error=(
                     "Downloader must return "
                     "HTML string or None"
                 ),
+
             )
 
         # --------------------------------------------------
@@ -747,12 +915,30 @@ class CrawlService:
             )
 
             return CrawlResult(
+
                 url=normalized_url,
+
                 resolved_url=resolved_url,
+
                 html=None,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
-                error="Downloaded HTML is empty",
+
+                error=(
+                    "Downloaded HTML is empty"
+                ),
+
             )
 
         # --------------------------------------------------
@@ -776,40 +962,166 @@ class CrawlService:
             )
 
             return CrawlResult(
+
                 url=normalized_url,
+
                 resolved_url=resolved_url,
+
                 html=html,
+
                 content_hash=None,
+
+                article_id=None,
+
+                document_id=None,
+
+                resources={
+                    "css": [],
+                    "images": [],
+                },
+
                 success=False,
-                error=str(exc),
+
+                error=str(
+                    exc
+                ),
+
             )
+
+        # --------------------------------------------------
+        # Download Resources
+        #
+        # Resource Download Failure
+        # 不應該讓 HTML Crawl Failure。
+        #
+        # HTML 已成功：
+        #
+        #     success=True
+        #
+        # 即使：
+        #
+        #     CSS = []
+        #     Images = []
+        # --------------------------------------------------
+
+        resources = {
+            "css": [],
+            "images": [],
+        }
+
+        try:
+
+            resources = (
+                self.resource_downloader(
+
+                    html,
+
+                    resolved_url,
+
+                )
+            )
+
+            # --------------------------------------------------
+            # Resource Result Validation
+            # --------------------------------------------------
+
+            if resources is None:
+
+                resources = {
+                    "css": [],
+                    "images": [],
+                }
+
+            elif not isinstance(
+                resources,
+                dict,
+            ):
+
+                logger.warning(
+                    "Resource downloader returned "
+                    "invalid result type: "
+                    f"url={normalized_url}, "
+                    f"type={type(resources).__name__}"
+                )
+
+                resources = {
+                    "css": [],
+                    "images": [],
+                }
+
+            else:
+
+                resources = {
+                    "css": resources.get(
+                        "css",
+                        [],
+                    ),
+
+                    "images": resources.get(
+                        "images",
+                        [],
+                    ),
+                }
+
+        except Exception as exc:
+
+            # --------------------------------------------------
+            # IMPORTANT
+            #
+            # Resource Failure
+            # 不等於 HTML Crawl Failure。
+            # --------------------------------------------------
+
+            logger.exception(
+                "Resource download failed: "
+                f"url={normalized_url}, "
+                f"error={exc}"
+            )
+
+            resources = {
+                "css": [],
+                "images": [],
+            }
 
         # --------------------------------------------------
         # Create Crawl Result
         # --------------------------------------------------
 
         result = CrawlResult(
+
             url=normalized_url,
+
             resolved_url=resolved_url,
+
             html=html,
+
             content_hash=content_hash,
+
+            # Crawl 階段尚未建立 Article
+            article_id=None,
+
+            # Crawl 階段尚未建立 Document Identity
+            document_id=None,
+
+            resources=resources,
+
             success=True,
+
             error=None,
+
         )
 
         # --------------------------------------------------
         # Save Raw HTML
         #
-        # Crawl 階段直接建立 Raw HTML Snapshot。
+        # Crawl 階段：
         #
-        # article_id:
-        #     None
-        #
-        # document_id:
-        #     None
+        #     article_id=None
+        #     document_id=None
         #
         # 後續 Article 建立後，
-        # 再由 update_metadata() 補回。
+        # 再由 Repository.update_metadata()
+        # 補回。
         # --------------------------------------------------
 
         if self.save_raw_html:
@@ -836,24 +1148,6 @@ class CrawlService:
         Algorithm：
 
             SHA-256
-
-        Input：
-
-            Raw HTML string
-
-        Output：
-
-            64 字元 hexadecimal hash。
-
-        注意：
-
-            這裡只負責 Hash Calculation。
-
-            不負責：
-
-                Duplicate Detection
-                Archive Version
-                URL Comparison
         """
 
         if html is None:
@@ -904,13 +1198,10 @@ class CrawlService:
             article_id=None
             document_id=None
 
-        注意：
+        同時保存：
 
-            MongoDB Save Failure
-            不會改變 CrawlResult.success。
-
-            HTTP Crawl 與 Persistence
-            是兩個不同責任。
+            resources.css[]
+            resources.images[]
         """
 
         if crawl_result is None:
@@ -948,9 +1239,13 @@ class CrawlService:
             # --------------------------------------------------
 
             save_crawl_result_method = getattr(
+
                 repository,
+
                 "save_crawl_result",
+
                 None,
+
             )
 
             if callable(
@@ -987,31 +1282,37 @@ class CrawlService:
             # --------------------------------------------------
 
             save_raw_html_method = getattr(
+
                 repository,
+
                 "save_raw_html",
+
                 None,
+
             )
 
             if callable(
                 save_raw_html_method
             ):
 
-                mongo_id = (
+                return (
                     save_raw_html_method(
                         crawl_result
                     )
                 )
-
-                return mongo_id
 
             # --------------------------------------------------
             # Generic save() Compatibility
             # --------------------------------------------------
 
             save_method = getattr(
+
                 repository,
+
                 "save",
+
                 None,
+
             )
 
             if callable(
@@ -1022,16 +1323,35 @@ class CrawlService:
 
                     return (
                         save_method(
-                            url=crawl_result.url,
-                            html=crawl_result.html,
+
+                            url=(
+                                crawl_result.url
+                            ),
+
+                            html=(
+                                crawl_result.html
+                            ),
+
                             content_hash=(
                                 crawl_result.content_hash
                             ),
+
                             resolved_url=(
                                 crawl_result.resolved_url
                             ),
-                            article_id=None,
-                            document_id=None,
+
+                            article_id=(
+                                crawl_result.article_id
+                            ),
+
+                            document_id=(
+                                crawl_result.document_id
+                            ),
+
+                            resources=(
+                                crawl_result.resources
+                            ),
+
                         )
                     )
 
@@ -1048,9 +1368,13 @@ class CrawlService:
                     )
 
             raise TypeError(
+
                 "raw_html_repository must provide "
+
                 "save_crawl_result(), "
+
                 "save_raw_html(), or save()"
+
             )
 
         except Exception as exc:
@@ -1083,17 +1407,6 @@ class CrawlService:
         """
         從 SearchResult 取得 URL
         後進行 Crawl。
-
-        只需要：
-
-            SearchResult.url
-
-        不需要：
-
-            keyword
-            provider
-            rank
-            SQL
         """
 
         if search_result is None:
@@ -1132,21 +1445,9 @@ class CrawlService:
         """
         Direct URL Target Crawl。
 
-        支援：
+        只需要：
 
             target.url
-
-        注意：
-
-            CrawlService 不需要：
-
-                target.keyword
-                target.sql_id
-                target.job_id
-
-            只需要：
-
-                target.url
         """
 
         if target is None:
@@ -1209,14 +1510,32 @@ class CrawlService:
             except Exception as exc:
 
                 result = CrawlResult(
+
                     url=str(
                         url
                     ),
+
                     resolved_url=None,
+
                     html=None,
+
                     content_hash=None,
+
+                    article_id=None,
+
+                    document_id=None,
+
+                    resources={
+                        "css": [],
+                        "images": [],
+                    },
+
                     success=False,
-                    error=str(exc),
+
+                    error=str(
+                        exc
+                    ),
+
                 )
 
             results.append(
@@ -1253,7 +1572,8 @@ class CrawlService:
                     └──→ ParserService
 
         每一個成功的 CrawlResult
-        都會在 crawl() 階段自動保存至 MongoDB。
+        都會在 crawl() 階段
+        自動保存至 MongoDB。
         """
 
         if search_results is None:
@@ -1275,20 +1595,42 @@ class CrawlService:
             except Exception as exc:
 
                 url = getattr(
+
                     search_result,
+
                     "url",
+
                     "",
+
                 )
 
                 result = CrawlResult(
+
                     url=str(
                         url
                     ),
+
                     resolved_url=None,
+
                     html=None,
+
                     content_hash=None,
+
+                    article_id=None,
+
+                    document_id=None,
+
+                    resources={
+                        "css": [],
+                        "images": [],
+                    },
+
                     success=False,
-                    error=str(exc),
+
+                    error=str(
+                        exc
+                    ),
+
                 )
 
             results.append(
@@ -1451,6 +1793,56 @@ class CrawlService:
 
         return crawl_result.content_hash
 
+    # ==================================================
+    #
+    # Get Resources
+    #
+    # ==================================================
+
+    @staticmethod
+    def get_resources(
+        crawl_result,
+    ):
+        """
+        從 CrawlResult 取得 Resources。
+
+        Returns：
+
+            {
+                "css": [],
+                "images": []
+            }
+        """
+
+        if not isinstance(
+            crawl_result,
+            CrawlResult,
+        ):
+
+            raise TypeError(
+                "crawl_result must be "
+                "a CrawlResult"
+            )
+
+        if not crawl_result.success:
+
+            raise ValueError(
+                "crawl did not succeed"
+            )
+
+        resources = (
+            crawl_result.resources
+        )
+
+        if resources is None:
+
+            return {
+                "css": [],
+                "images": [],
+            }
+
+        return resources
+
 
 # ==================================================
 #
@@ -1479,6 +1871,8 @@ def crawl(
     Crawl 成功後：
 
         Raw HTML
+            +
+        Resources
             ↓
         MongoDB
     """
@@ -1496,12 +1890,6 @@ def crawl_search_result(
     """
     使用預設 CrawlService
     Crawl 單一 SearchResult。
-
-    Crawl 成功後：
-
-        Raw HTML
-            ↓
-        MongoDB
     """
 
     return (
@@ -1518,12 +1906,6 @@ def crawl_target(
     """
     使用預設 CrawlService
     Crawl Direct URL Target。
-
-    Crawl 成功後：
-
-        Raw HTML
-            ↓
-        MongoDB
     """
 
     return (
@@ -1541,10 +1923,17 @@ def crawl_target(
 # ==================================================
 
 __all__ = [
+
     "CrawlResult",
+
     "CrawlService",
+
     "default_crawl_service",
+
     "crawl",
+
     "crawl_search_result",
+
     "crawl_target",
+
 ]

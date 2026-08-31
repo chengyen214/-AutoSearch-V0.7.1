@@ -1,168 +1,259 @@
 """
 models/raw_html.py
 
-AutoSearch V4
-
-P4.5
+AutoSearch V5
 
 Raw HTML MongoDB Model
 
-功能:
+功能：
 
-1. 定義 MongoDB Raw HTML 資料結構
+1. 定義 MongoDB Raw HTML Snapshot 資料結構
 2. 儲存原始 HTML 本體
 3. 儲存 HTML Metadata
-4. 提供 Repository 使用
-5. 不負責 MongoDB Connection
-6. 不負責 HTML File Storage
-7. 不負責 Archive Version
+4. 儲存 Snapshot Resources
+5. 提供 Repository 使用
+6. 不負責 MongoDB Connection
+7. 不負責 HTTP Download
+8. 不負責 Resource Download
+9. 不負責 Hash Calculation
+10. 不負責 Archive Version
 
-Storage:
+Storage：
 
     MongoDB
         ↓
     raw_html collection
 
-注意:
 
-    本 Model 不是 Local HTML Migration Tool。
+MongoDB Document：
 
-    不負責:
+    raw_html
+    ├── _id
+    ├── url
+    ├── html
+    ├── content_hash
+    ├── resolved_url
+    ├── document_id
+    ├── created_at
+    ├── updated_at
+    │
+    └── resources
+        ├── css[]
+        │   ├── url
+        │   ├── content
+        │   ├── content_hash
+        │   ├── mime_type
+        │   └── file_size
+        │
+        └── images[]
+            ├── url
+            ├── data
+            ├── content_hash
+            ├── mime_type
+            └── file_size
 
-        archive/html
-            ↓
-        MongoDB
 
-    舊 HTML Migration
-    將於後續 Migration 階段處理。
+注意：
+
+    本 Model 只描述資料結構。
+
+    不負責：
+
+        HTTP Download
+        CSS Download
+        Image Download
+        Resource Extraction
+        Hash Calculation
+        MongoDB Connection
+        Archive Version
+        Duplicate Detection
 """
 
 
-from datetime import datetime
+# ==================================================
+#
+# Standard Library
+#
+# ==================================================
 
+from datetime import (
+    datetime,
+)
+
+
+# ==================================================
+#
+# Raw HTML Model
+#
+# ==================================================
 
 class RawHTML:
     """
-    Raw HTML Model
+    Raw HTML Model。
 
-    代表 MongoDB 中的一筆
-    原始 HTML Archive。
+    代表 MongoDB raw_html
+    Collection 中的一筆 Snapshot。
 
-    Storage:
+    正式欄位：
 
-        MongoDB
+        _id
+        url
+        html
+        content_hash
+        resolved_url
+        document_id
+        created_at
+        updated_at
+        resources
 
-    Collection:
+    Resources：
 
-        raw_html
+        resources.css[]
+        resources.images[]
     """
 
-    # ======================================
+    # ==================================================
     # Initialize
-    # ======================================
+    # ==================================================
 
     def __init__(
         self,
-        document_id=None,
-        article_id=None,
         url=None,
         html=None,
         content_hash=None,
-        mime_type="text/html",
-        file_size=None,
-        created_time=None,
-        mongo_id=None
+        resolved_url=None,
+        document_id=None,
+        created_at=None,
+        updated_at=None,
+        resources=None,
+        mongo_id=None,
     ):
         """
         建立 RawHTML Model。
 
-        Args:
+        Parameters
+        ----------
+        url : str
+            原始 URL。
 
-            document_id:
-                Article document_id
+        html : str
+            原始 HTML。
 
-            article_id:
-                Article database ID
+        content_hash : str
+            Raw HTML SHA-256。
 
-            url:
-                Original URL
+        resolved_url : str
+            Redirect 後 URL。
 
-            html:
-                原始 HTML 本體
+        document_id : str
+            Article Document Identity。
 
-            content_hash:
-                HTML Content SHA256
+        created_at : datetime
+            Snapshot 建立時間。
 
-            mime_type:
-                MIME Type
+        updated_at : datetime
+            Snapshot 最後更新時間。
 
-            file_size:
-                HTML Size in Bytes
+        resources : dict
+            Snapshot Resource。
 
-            created_time:
-                建立時間
+            結構：
 
-            mongo_id:
-                MongoDB ObjectId
+                {
+                    "css": [],
+                    "images": []
+                }
+
+        mongo_id :
+            MongoDB ObjectId。
+
+        注意：
+
+            Model 不負責：
+
+                Resource Download
+                Hash Calculation
+                MongoDB Connection
         """
+
+        # --------------------------------------------------
+        # MongoDB ObjectId
+        # --------------------------------------------------
 
         self.mongo_id = mongo_id
 
-        self.document_id = (
-            document_id
-        )
+        # --------------------------------------------------
+        # Original URL
+        # --------------------------------------------------
 
-        self.article_id = (
-            article_id
-        )
+        self.url = url
 
-        self.url = (
-            url
-        )
+        # --------------------------------------------------
+        # Raw HTML
+        # --------------------------------------------------
 
-        self.html = (
-            html
-        )
+        self.html = html
 
-        self.content_hash = (
-            content_hash
-        )
+        # --------------------------------------------------
+        # HTML Content Hash
+        # --------------------------------------------------
 
-        self.mime_type = (
-            mime_type
-        )
+        self.content_hash = content_hash
 
-        self.file_size = (
-            file_size
-        )
+        # --------------------------------------------------
+        # Resolved URL
+        # --------------------------------------------------
 
-        self.created_time = (
-            created_time
-            if created_time is not None
-            else datetime.now()
-        )
+        self.resolved_url = resolved_url
 
-    # ======================================
+        # --------------------------------------------------
+        # Document ID
+        # --------------------------------------------------
+
+        self.document_id = document_id
+
+        # --------------------------------------------------
+        # Created At
+        # --------------------------------------------------
+
+        self.created_at = created_at
+
+        # --------------------------------------------------
+        # Updated At
+        # --------------------------------------------------
+
+        self.updated_at = updated_at
+
+        # --------------------------------------------------
+        # Resources
+        # --------------------------------------------------
+
+        if resources is None:
+
+            resources = {
+                "css": [],
+                "images": [],
+            }
+
+        self.resources = resources
+
+    # ==================================================
     # To Mongo Document
-    # ======================================
+    # ==================================================
 
     def to_dict(self):
         """
         RawHTML Model
-        ↓
+            ↓
         MongoDB Document
 
-        MongoDB Repository
-        將使用此方法建立 Document。
+        保留目前 MongoDB
+        raw_html 正式欄位。
+
+        不新增其他欄位。
         """
 
         document = {
-
-            "document_id":
-                self.document_id,
-
-            "article_id":
-                self.article_id,
 
             "url":
                 self.url,
@@ -173,23 +264,29 @@ class RawHTML:
             "content_hash":
                 self.content_hash,
 
-            "mime_type":
-                self.mime_type,
+            "resolved_url":
+                self.resolved_url,
 
-            "file_size":
-                self.file_size,
+            "document_id":
+                self.document_id,
 
-            "created_time":
-                self.created_time
+            "created_at":
+                self.created_at,
+
+            "updated_at":
+                self.updated_at,
+
+            "resources":
+                self.resources,
 
         }
 
-        # ----------------------------------
+        # --------------------------------------------------
         # MongoDB ObjectId
         #
-        # 只有已存在的 Mongo Document
+        # 只有既有 MongoDB Document
         # 才加入 _id。
-        # ----------------------------------
+        # --------------------------------------------------
 
         if self.mongo_id is not None:
 
@@ -199,18 +296,18 @@ class RawHTML:
 
         return document
 
-    # ======================================
+    # ==================================================
     # From Mongo Document
-    # ======================================
+    # ==================================================
 
     @classmethod
     def from_dict(
         cls,
-        document
+        document,
     ):
         """
         MongoDB Document
-        ↓
+            ↓
         RawHTML Model
         """
 
@@ -218,18 +315,27 @@ class RawHTML:
 
             return None
 
+        resources = (
+            document.get(
+                "resources"
+            )
+        )
+
+        # --------------------------------------------------
+        # Resource Default
+        # --------------------------------------------------
+
+        if resources is None:
+
+            resources = {
+                "css": [],
+                "images": [],
+            }
+
         return cls(
 
             mongo_id=document.get(
                 "_id"
-            ),
-
-            document_id=document.get(
-                "document_id"
-            ),
-
-            article_id=document.get(
-                "article_id"
             ),
 
             url=document.get(
@@ -244,57 +350,111 @@ class RawHTML:
                 "content_hash"
             ),
 
-            mime_type=document.get(
-                "mime_type",
-                "text/html"
+            resolved_url=document.get(
+                "resolved_url"
             ),
 
-            file_size=document.get(
-                "file_size"
+            document_id=document.get(
+                "document_id"
             ),
 
-            created_time=document.get(
-                "created_time"
-            )
+            created_at=document.get(
+                "created_at"
+            ),
+
+            updated_at=document.get(
+                "updated_at"
+            ),
+
+            resources=resources,
 
         )
 
-    # ======================================
+    # ==================================================
+    # Resource Helpers
+    # ==================================================
+
+    @property
+    def css_resources(self):
+        """
+        取得 CSS Resources。
+        """
+
+        return self.resources.get(
+            "css",
+            []
+        )
+
+    # ==================================================
+
+    @property
+    def image_resources(self):
+        """
+        取得 Image Resources。
+        """
+
+        return self.resources.get(
+            "images",
+            []
+        )
+
+    # ==================================================
     # String
-    # ======================================
+    # ==================================================
 
     def __repr__(self):
         """
         Debug representation。
 
-        不直接輸出完整 HTML，
-        避免 Log / Console 出現大量內容。
+        不輸出：
+
+            完整 HTML
+            CSS Content
+            Image Data
+
+        避免 Log / Console
+        出現大量資料。
         """
 
         return (
 
             "RawHTML("
 
-            f"document_id={self.document_id!r}, "
-
-            f"article_id={self.article_id!r}, "
+            f"mongo_id={self.mongo_id!r}, "
 
             f"url={self.url!r}, "
 
-            f"content_hash={self.content_hash!r}, "
+            f"content_hash="
+            f"{self.content_hash!r}, "
 
-            f"file_size={self.file_size!r}, "
+            f"resolved_url="
+            f"{self.resolved_url!r}, "
 
-            f"mongo_id={self.mongo_id!r}"
+            f"document_id="
+            f"{self.document_id!r}, "
+
+            f"created_at="
+            f"{self.created_at!r}, "
+
+            f"updated_at="
+            f"{self.updated_at!r}, "
+
+            f"css_count="
+            f"{len(self.css_resources)}, "
+
+            f"image_count="
+            f"{len(self.image_resources)}"
 
             ")"
 
         )
 
 
-# ======================================
+# ==================================================
+#
 # Public API
-# ======================================
+#
+# ==================================================
 
 __all__ = [
     "RawHTML",

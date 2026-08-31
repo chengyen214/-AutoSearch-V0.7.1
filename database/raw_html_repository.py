@@ -43,6 +43,7 @@ Crawl 階段：
 
     因此：
 
+        article_id = None
         document_id = None
 
     但已經具有：
@@ -51,18 +52,63 @@ Crawl 階段：
         resolved_url
         html
         content_hash
+        resources
         created_at
 
 
-Archive Version：
+Resources：
 
-    不使用 Article ID。
+    CrawlService 在取得 Raw HTML 後
+    同時取得：
 
-    Version Identity：
+        resources
+        ├── css[]
+        └── images[]
 
-        URL
-        +
-        created_at
+    RawHTMLRepository 負責：
+
+        CrawlResult.resources
+                ↓
+        MongoDB raw_html.resources
+
+
+MongoDB Raw HTML Structure：
+
+    raw_html
+    ├── article_id
+    ├── url
+    ├── resolved_url
+    ├── html
+    ├── content_hash
+    ├── document_id
+    ├── created_at
+    ├── updated_at
+    │
+    └── resources
+        ├── css[]
+        └── images[]
+
+
+Archive：
+
+    article_id：
+
+        保留作為 Article 關聯資訊。
+
+    但：
+
+        article_id
+        不參與 Duplicate Detection。
+
+
+Duplicate Lookup：
+
+    URL
+    +
+    Content Hash
+
+    由 ArchiveService 負責
+    Duplicate Decision。
 
 
 Archive Web Page：
@@ -79,7 +125,7 @@ Archive Web Page：
     使用者選擇保存日期
         |
         v
-    find_html_by_url_and_time()
+    find_by_url_and_time()
         |
         v
     MongoDB Raw HTML
@@ -196,6 +242,27 @@ class RawHTMLRepository:
         MongoDB
 
 
+    Raw HTML Snapshot：
+
+        article_id
+        url
+        resolved_url
+        html
+        content_hash
+        resources
+        document_id
+        created_at
+        updated_at
+
+
+    Resources：
+
+        {
+            "css": [],
+            "images": []
+        }
+
+
     Archive Viewer 所需的核心查詢：
 
         URL
@@ -264,18 +331,6 @@ class RawHTMLRepository:
             naive datetime
                 ↓
             視為 UTC
-
-
-        例如：
-
-            2026-08-29T14:20:00Z
-                ↓
-            2026-08-29 14:20:00+00:00
-
-
-            2026-08-29T22:20:00+08:00
-                ↓
-            2026-08-29 14:20:00+00:00
         """
 
         if value is None:
@@ -359,6 +414,140 @@ class RawHTMLRepository:
         )
 
     # ==================================================
+    # Normalize Resources
+    # ==================================================
+
+    @staticmethod
+    def _normalize_resources(
+        resources
+    ):
+        """
+        Normalize CrawlResult.resources。
+
+        預期格式：
+
+            {
+                "css": [],
+                "images": []
+            }
+
+
+        規則：
+
+            None
+                ↓
+            空 Resources
+
+
+            非 dict
+                ↓
+            空 Resources
+
+
+            缺少 css / images
+                ↓
+            自動補空 list
+
+
+        Repository 不負責：
+
+            Resource Download
+            Resource Validation
+            Resource Deduplication
+
+        只負責建立穩定的 MongoDB Structure。
+        """
+
+        # --------------------------------------------------
+        # None
+        # --------------------------------------------------
+
+        if resources is None:
+
+            return {
+                "css": [],
+                "images": [],
+            }
+
+        # --------------------------------------------------
+        # Invalid Type
+        # --------------------------------------------------
+
+        if not isinstance(
+            resources,
+            dict,
+        ):
+
+            logger.warning(
+                "Invalid resources type: "
+                f"type={type(resources).__name__}"
+            )
+
+            return {
+                "css": [],
+                "images": [],
+            }
+
+        # --------------------------------------------------
+        # CSS
+        # --------------------------------------------------
+
+        css = resources.get(
+            "css",
+            [],
+        )
+
+        if css is None:
+
+            css = []
+
+        elif not isinstance(
+            css,
+            list,
+        ):
+
+            logger.warning(
+                "Invalid resources.css type: "
+                f"type={type(css).__name__}"
+            )
+
+            css = []
+
+        # --------------------------------------------------
+        # Images
+        # --------------------------------------------------
+
+        images = resources.get(
+            "images",
+            [],
+        )
+
+        if images is None:
+
+            images = []
+
+        elif not isinstance(
+            images,
+            list,
+        ):
+
+            logger.warning(
+                "Invalid resources.images type: "
+                f"type={type(images).__name__}"
+            )
+
+            images = []
+
+        # --------------------------------------------------
+        # Return normalized Resources
+        # --------------------------------------------------
+
+        return {
+            "css": css,
+            "images": images,
+        }
+
+    # ==================================================
     # Ensure Indexes
     # ==================================================
 
@@ -370,6 +559,7 @@ class RawHTMLRepository:
 
         Index：
 
+            article_id
             document_id
             url
             resolved_url
@@ -379,12 +569,20 @@ class RawHTMLRepository:
 
             url + created_at
 
+
         注意：
 
             所有 Index 都不是 Unique。
 
             Duplicate Detection
             仍由 ArchiveService 負責。
+
+
+        article_id：
+
+            只作為 Article 關聯 Lookup。
+
+            不參與 Duplicate Detection。
 
 
         Archive Viewer：
@@ -395,6 +593,18 @@ class RawHTMLRepository:
         """
 
         try:
+
+            # ------------------------------------------
+            # Article ID
+            #
+            # Article 關聯 Lookup
+            #
+            # 不參與 Duplicate Detection
+            # ------------------------------------------
+
+            self.collection.create_index(
+                "article_id"
+            )
 
             # ------------------------------------------
             # Document ID
@@ -431,9 +641,11 @@ class RawHTMLRepository:
             # ------------------------------------------
             # URL + Content Hash
             #
-            # Duplicate Lookup
+            # Lookup
             #
-            # 由 ArchiveService 使用。
+            # Duplicate Decision：
+            #
+            #     ArchiveService
             # ------------------------------------------
 
             self.collection.create_index(
@@ -447,16 +659,6 @@ class RawHTMLRepository:
             # URL + Created At
             #
             # Archive Version Lookup
-            #
-            # 用於：
-            #
-            #     URL
-            #       ↓
-            #     歷史保存日期
-            #
-            #     URL + created_at
-            #       ↓
-            #     指定 HTML Snapshot
             # ------------------------------------------
 
             self.collection.create_index(
@@ -485,16 +687,32 @@ class RawHTMLRepository:
 
     def save(
         self,
+        article_id=None,
         url=None,
         html=None,
         content_hash=None,
         resolved_url=None,
         document_id=None,
+        resources=None,
     ):
         """
         儲存 Raw HTML Snapshot。
 
-        Crawl 階段最小需求：
+        Article 階段：
+
+            article_id
+                ↓
+            MongoDB raw_html.article_id
+
+
+        Crawl 階段：
+
+            article_id=None
+
+            仍然可以正常保存。
+
+
+        最小需求：
 
             url
             html
@@ -503,17 +721,34 @@ class RawHTMLRepository:
 
         可選 metadata：
 
+            article_id
             resolved_url
             document_id
+            resources
 
 
-        Archive Version：
+        MongoDB：
 
-            不依賴 Article ID。
+            article_id
+            url
+            resolved_url
+            html
+            content_hash
+            document_id
+            resources
+            created_at
+            updated_at
 
-            保存時間：
 
-                created_at
+        注意：
+
+            article_id 不參與 Duplicate Detection。
+
+            Duplicate Detection：
+
+                URL
+                +
+                Content Hash
 
 
         本方法不負責：
@@ -521,7 +756,32 @@ class RawHTMLRepository:
             Hash Calculation
             Duplicate Detection
             Archive Version Decision
+            Resource Download
         """
+
+        # ==================================================
+        # Normalize Article ID
+        # ==================================================
+
+        if article_id is not None:
+
+            try:
+
+                article_id = int(
+                    article_id
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                logger.warning(
+                    "Invalid article_id: "
+                    f"{article_id}"
+                )
+
+                return None
 
         # ==================================================
         # Validate URL
@@ -630,6 +890,16 @@ class RawHTMLRepository:
                 document_id = None
 
         # ==================================================
+        # Normalize Resources
+        # ==================================================
+
+        resources = (
+            self._normalize_resources(
+                resources
+            )
+        )
+
+        # ==================================================
         # Current UTC Time
         # ==================================================
 
@@ -642,6 +912,9 @@ class RawHTMLRepository:
         # ==================================================
 
         document = {
+
+            "article_id":
+                article_id,
 
             "document_id":
                 document_id,
@@ -657,6 +930,9 @@ class RawHTMLRepository:
 
             "content_hash":
                 content_hash,
+
+            "resources":
+                resources,
 
             "created_at":
                 now,
@@ -685,10 +961,13 @@ class RawHTMLRepository:
             logger.info(
                 "Raw HTML saved to MongoDB: "
                 f"mongo_id={mongo_id}, "
+                f"article_id={article_id}, "
                 f"url={url}, "
                 f"resolved_url={resolved_url}, "
                 f"document_id={document_id}, "
                 f"content_hash={content_hash}, "
+                f"resources_css={len(resources['css'])}, "
+                f"resources_images={len(resources['images'])}, "
                 f"created_at={now}"
             )
 
@@ -717,16 +996,18 @@ class RawHTMLRepository:
 
         CrawlResult：
 
+            article_id
             url
             resolved_url
             html
             content_hash
+            resources
+            document_id
 
 
         Crawl 階段：
 
-            不需要 Article ID。
-
+            article_id 可以為 None。
 
         Returns：
 
@@ -765,6 +1046,12 @@ class RawHTMLRepository:
         # Extract CrawlResult
         # ==================================================
 
+        article_id = getattr(
+            crawl_result,
+            "article_id",
+            None
+        )
+
         url = getattr(
             crawl_result,
             "url",
@@ -789,11 +1076,25 @@ class RawHTMLRepository:
             None
         )
 
+        resources = getattr(
+            crawl_result,
+            "resources",
+            None
+        )
+
+        document_id = getattr(
+            crawl_result,
+            "document_id",
+            None
+        )
+
         # ==================================================
         # Save
         # ==================================================
 
         return self.save(
+
+            article_id=article_id,
 
             url=url,
 
@@ -802,6 +1103,10 @@ class RawHTMLRepository:
             html=html,
 
             content_hash=content_hash,
+
+            document_id=document_id,
+
+            resources=resources,
 
         )
 
@@ -1004,6 +1309,7 @@ class RawHTMLRepository:
         不回傳：
 
             html
+            resources
 
 
         最新保存版本在前。
@@ -1121,18 +1427,6 @@ class RawHTMLRepository:
 
             created_at 必須先統一成
             timezone-aware UTC datetime。
-
-
-        用途：
-
-            使用者在 Archive Web Page
-            點擊某個歷史保存日期：
-
-                URL + created_at
-                    ↓
-                MongoDB
-                    ↓
-                指定 Snapshot
         """
 
         if not url:
@@ -1213,20 +1507,6 @@ class RawHTMLRepository:
         取得指定歷史保存版本的 Raw HTML。
 
         只回傳 HTML。
-
-        用途：
-
-            Archive Article Page
-                ↓
-            使用者選擇歷史保存日期
-                ↓
-            URL + created_at
-                ↓
-            MongoDB
-                ↓
-            HTML
-                ↓
-            Web Page
         """
 
         document = (
@@ -1376,6 +1656,11 @@ class RawHTMLRepository:
         Duplicate Decision：
 
             ArchiveService
+
+
+        注意：
+
+            article_id 不參與查詢。
         """
 
         if not url:
@@ -1497,6 +1782,9 @@ class RawHTMLRepository:
             Duplicate Decision：
 
                 ArchiveService
+
+
+        article_id 不參與查詢。
         """
 
         if not url:
@@ -1577,24 +1865,18 @@ class RawHTMLRepository:
 
         不更新：
 
+            article_id
             url
             resolved_url
             html
             content_hash
+            resources
             created_at
 
 
         updated_at：
 
             使用 UTC datetime。
-
-
-        注意：
-
-            不再處理 article_id。
-
-            Archive Version
-            不依賴 Article ID。
         """
 
         if not mongo_id:
@@ -1703,14 +1985,11 @@ class RawHTMLRepository:
 
             Repository 不自行計算 Hash。
 
-        Archive Version：
 
-            由 ArchiveService 管理。
+        不更新：
 
-
-        updated_at：
-
-            使用 UTC datetime。
+            resources
+            article_id
         """
 
         if not mongo_id:
