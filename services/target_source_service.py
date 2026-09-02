@@ -23,8 +23,7 @@ Target Source Resolution Service
     Source Definition
 
 
-支援:
-
+支援：
 
     1.
 
@@ -35,15 +34,15 @@ Target Source Resolution Service
         direct_url
 
 
-
     2.
 
     URL + Keyword
 
         url + keyword
           ↓
-        google_search definition
-
+        generic_search definition
+          ↓
+        crawler_url
 
 
     3.
@@ -53,7 +52,6 @@ Target Source Resolution Service
         keyword + provider
           ↓
         search definition
-
 
 
 不負責：
@@ -80,21 +78,45 @@ Target Source Resolution Service
         Source 如何執行。
 
 
-    Provider Resolution:
+    Provider Resolution：
 
         SourceResolutionBridge
 
-    負責。
+
+    crawler_url：
+
+        TargetRepository
+            ↓
+        TargetSourceService
+            ↓
+        Source Definition
+            ↓
+        後續 Pipeline
 """
 
 
+# ==================================================
+#
+# Imports
+#
+# ==================================================
+
 from models.target import Target
 
+from database.target_repository import (
+    TargetRepository,
+)
 
+
+# ==================================================
+#
+# Target Source Service
+#
+# ==================================================
 
 class TargetSourceService:
     """
-    Target Source Resolution Service
+    Target Source Resolution Service。
 
 
     Target
@@ -102,12 +124,11 @@ class TargetSourceService:
     Source Definition
 
 
-    Source Type:
+    Source Type：
 
         direct_url
 
             直接 Crawl URL
-
 
 
         search
@@ -123,8 +144,16 @@ class TargetSourceService:
 
         Search Result
 
-    """
 
+    crawler_url：
+
+        只負責從 TargetRepository 取得
+        並放入 Source Definition。
+
+    不負責：
+
+        crawler_url 的 Database Persistence
+    """
 
 
     # ==================================================
@@ -138,17 +167,35 @@ class TargetSourceService:
     SOURCE_TYPE_SEARCH = "search"
 
 
-
     # ==================================================
     #
     # Default Provider
     #
     # ==================================================
 
-    DEFAULT_URL_SEARCH_PROVIDER = (
-        "google_search"
-    )
+    """
+    URL + Keyword 的預設 Search Provider。
 
+    V5.6.3：
+
+        URL + Keyword
+            ↓
+        generic_search
+            ↓
+        GenericSearchProvider
+
+    Google News 仍可透過：
+
+        Search Target
+            ↓
+        search_provider = google_news
+
+    指定。
+    """
+
+    DEFAULT_URL_SEARCH_PROVIDER = (
+        "generic_search"
+    )
 
 
     # ==================================================
@@ -162,6 +209,36 @@ class TargetSourceService:
     TARGET_TYPE_SEARCH = "search"
 
 
+    # ==================================================
+    #
+    # Constructor
+    #
+    # ==================================================
+
+    def __init__(
+        self,
+        target_repository=None,
+    ):
+        """
+        建立 TargetSourceService。
+
+        TargetRepository 用於：
+
+            URL + Keyword
+                ↓
+            取得 crawler_url
+        """
+
+        if target_repository is None:
+
+            target_repository = (
+                TargetRepository()
+            )
+
+        self.target_repository = (
+            target_repository
+        )
+
 
     # ==================================================
     #
@@ -171,7 +248,7 @@ class TargetSourceService:
 
     def resolve(
         self,
-        target
+        target,
     ):
         """
         Target
@@ -183,13 +260,11 @@ class TargetSourceService:
             target
         )
 
-
         target_type = (
             self._normalize_string(
                 target.target_type
             ).lower()
         )
-
 
         if target_type == self.TARGET_TYPE_URL:
 
@@ -199,7 +274,6 @@ class TargetSourceService:
                 )
             )
 
-
         if target_type == self.TARGET_TYPE_SEARCH:
 
             return (
@@ -208,11 +282,10 @@ class TargetSourceService:
                 )
             )
 
-
         raise ValueError(
-            f"Unsupported target type: {target_type}"
+            f"Unsupported target type: "
+            f"{target_type}"
         )
-
 
 
     # ==================================================
@@ -223,35 +296,38 @@ class TargetSourceService:
 
     def resolve_url_target(
         self,
-        target
+        target,
     ):
         """
-        URL Target Resolution
+        URL Target Resolution。
 
 
-        Rule:
-
-
-        URL + keyword
+        URL + keyword：
 
             ↓
 
-        Google Search
+        generic_search
 
 
-        URL only
+        URL only：
 
             ↓
 
-        Direct URL Crawl
+        direct_url
 
+
+        URL + Keyword：
+
+            TargetRepository
+                ↓
+            crawler_url
+                ↓
+            Source Definition
         """
-
 
         url = self._normalize_string(
             target.url
         )
-
 
         if not url:
 
@@ -260,74 +336,101 @@ class TargetSourceService:
             )
 
 
-
         keyword = (
             self._normalize_string(
                 getattr(
                     target,
                     "keyword",
-                    None
+                    None,
                 )
             )
         )
 
 
-
-        # ----------------------------------------------
+        # ==================================================
         #
         # URL + Keyword
         #
-        # Google Search
-        #
-        # ----------------------------------------------
+        # ==================================================
 
         if keyword:
-            
-            return {
+
+            # ----------------------------------------------
+            #
+            # Get crawler_url
+            #
+            # ----------------------------------------------
+
+            crawler_url = (
+                self.target_repository
+                .get_crawler_url_by_url_keyword(
+                    url=url,
+                    keyword=keyword,
+                )
+            )
+
+
+            # ----------------------------------------------
+            #
+            # Normalize crawler_url
+            #
+            # ----------------------------------------------
+
+            crawler_url = (
+                self._normalize_string(
+                    crawler_url
+                )
+            )
+
+
+            # ----------------------------------------------
+            #
+            # Source Definition
+            #
+            # ----------------------------------------------
+
+            source_definition = {
 
                 "source_type":
                     self.SOURCE_TYPE_SEARCH,
 
-
                 "target_type":
                     self.TARGET_TYPE_URL,
-
 
                 "keyword":
                     keyword,
 
-
                 "provider":
                     self.DEFAULT_URL_SEARCH_PROVIDER,
-
 
                 "site":
                     url,
 
+                "crawler_url":
+                    crawler_url,
             }
 
 
-        # ----------------------------------------------
+            return source_definition
+
+
+        # ==================================================
         #
         # Direct URL
         #
-        # ----------------------------------------------
+        # ==================================================
 
         return {
 
             "source_type":
                 self.SOURCE_TYPE_DIRECT_URL,
 
-
             "target_type":
                 self.TARGET_TYPE_URL,
 
-
             "url":
                 url,
-
         }
-
 
 
     # ==================================================
@@ -338,10 +441,10 @@ class TargetSourceService:
 
     def resolve_search_target(
         self,
-        target
+        target,
     ):
         """
-        Search Target Resolution
+        Search Target Resolution。
 
 
         keyword + provider
@@ -351,24 +454,23 @@ class TargetSourceService:
         search definition
 
 
-        Provider:
+        Provider：
+
+            generic_search
 
             google_search
 
             google_news
 
 
-        Provider Resolution:
+        Provider Resolution：
 
             SourceResolutionBridge
-
         """
-
 
         keyword = self._normalize_string(
             target.keyword
         )
-
 
         if not keyword:
 
@@ -377,15 +479,15 @@ class TargetSourceService:
             )
 
 
-
-        provider = self._normalize_string(
-            getattr(
-                target,
-                "search_provider",
-                None
+        provider = (
+            self._normalize_string(
+                getattr(
+                    target,
+                    "search_provider",
+                    None,
+                )
             )
         )
-
 
         if not provider:
 
@@ -394,26 +496,20 @@ class TargetSourceService:
             )
 
 
-
         return {
 
             "source_type":
                 self.SOURCE_TYPE_SEARCH,
 
-
             "target_type":
                 self.TARGET_TYPE_SEARCH,
-
 
             "keyword":
                 keyword,
 
-
             "provider":
                 provider,
-
         }
-
 
 
     # ==================================================
@@ -424,83 +520,136 @@ class TargetSourceService:
 
     def is_url_target(
         self,
-        target
+        target,
     ):
 
         self._validate_target(
             target
         )
 
-
         return (
-
             self._normalize_string(
                 target.target_type
             ).lower()
-
-            ==
-
-            self.TARGET_TYPE_URL
-
+            == self.TARGET_TYPE_URL
         )
-
 
 
     def is_search_target(
         self,
-        target
+        target,
     ):
 
         self._validate_target(
             target
         )
 
-
         return (
-
             self._normalize_string(
                 target.target_type
             ).lower()
-
-            ==
-
-            self.TARGET_TYPE_SEARCH
-
+            == self.TARGET_TYPE_SEARCH
         )
-
 
 
     def get_source_type(
         self,
-        target
+        target,
     ):
         """
-        取得 Source Type
+        取得 Source Type。
         """
 
         result = self.resolve(
             target
         )
 
-
         return result["source_type"]
 
+
+    # ==================================================
+    #
+    # Get Provider
+    #
+    # ==================================================
+
+    def get_provider(
+        self,
+        target,
+    ):
+        """
+        取得 Target 對應的 Provider 名稱。
+
+        注意：
+
+            本方法不建立 Provider Instance。
+
+            Provider Instance 由：
+
+                SourceResolutionBridge
+
+            負責。
+        """
+
+        result = self.resolve(
+            target
+        )
+
+        if result.get(
+            "source_type"
+        ) != self.SOURCE_TYPE_SEARCH:
+
+            return None
+
+        return result.get(
+            "provider"
+        )
+
+
+    # ==================================================
+    #
+    # Get Crawler URL
+    #
+    # ==================================================
+
+    def get_crawler_url(
+        self,
+        target,
+    ):
+        """
+        取得 URL + Keyword 對應的 crawler_url。
+
+        Target
+            ↓
+        TargetSourceService
+            ↓
+        Source Definition
+            ↓
+        crawler_url
+        """
+
+        result = self.resolve(
+            target
+        )
+
+        return result.get(
+            "crawler_url"
+        )
 
 
     # ==================================================
     #
     # Internal
-    #
     # ==================================================
 
     @staticmethod
     def _validate_target(
-        target
+        target,
     ):
 
         if not isinstance(
             target,
-            Target
+            Target,
         ):
 
             raise TypeError(
@@ -508,23 +657,26 @@ class TargetSourceService:
             )
 
 
-
     @staticmethod
     def _normalize_string(
-        value
+        value,
     ):
 
         if value is None:
 
             return ""
 
-
         return str(
             value
         ).strip()
 
 
+# ==================================================
+#
+# Public API
+#
+# ==================================================
 
 __all__ = [
-    "TargetSourceService"
+    "TargetSourceService",
 ]

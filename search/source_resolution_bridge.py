@@ -3,7 +3,7 @@ services/source_resolution_bridge.py
 
 AutoSearch V5
 
-V5.6.3
+V5.6.4
 
 Source Resolution Bridge
 
@@ -27,15 +27,17 @@ URL + Keyword Search：
 
     TargetSourceService
         ↓
-    site
+        site
+        crawler_url
         ↓
     SourceResolutionBridge
         ↓
-    url
+        url
+        crawler_url
         ↓
     ProviderSearchAdapter
         ↓
-    GoogleSearchProvider
+    GenericSearchProvider
 
 
 設計原則：
@@ -43,6 +45,7 @@ URL + Keyword Search：
     URL + Keyword：
 
         site → url
+        crawler_url → crawler_url
 
     Search Provider：
 
@@ -51,16 +54,26 @@ URL + Keyword Search：
 
     Google Search：
 
-        keyword + optional url
+        keyword
+        +
+        optional url
+
+        ↓
+
+        GenericSearchProvider
 
     Google News：
 
         keyword
 
+        ↓
+
+        GoogleNewsProvider
+
 本模組不負責：
 
     - adapter.search()
-    - Google Search API
+    - Search API
     - Google News RSS
     - URL Deduplication
     - Crawler
@@ -70,26 +83,42 @@ URL + Keyword Search：
     - AI
 """
 
+
+# ==================================================
+#
+# Imports
+#
+# ==================================================
+
 from search.search_provider import (
     SearchProvider,
 )
 
-from search.google_search_provider import (
-    GoogleSearchProvider,
+
+from search.generic_search_provider import (
+    GenericSearchProvider,
 )
+
 
 from search.google_news_provider import (
     GoogleNewsProvider,
 )
+
 
 from search.provider_adapter import (
     ProviderSearchAdapter,
 )
 
 
+# ==================================================
+#
+# Source Resolution Bridge
+#
+# ==================================================
+
 class SourceResolutionBridge:
     """
-    V5.6.3 Source Resolution Bridge。
+    V5.6.4 Source Resolution Bridge。
 
     只負責：
 
@@ -105,38 +134,53 @@ class SourceResolutionBridge:
           ↓
         url
 
-    給後續 Search Execution 使用。
+        crawler_url
+          ↓
+        crawler_url
+
+    給後續 Search Execution / Crawl Pipeline 使用。
 
     不負責：
 
         adapter.search()
     """
 
+
     # ==================================================
     # Source Types
     # ==================================================
 
-    SOURCE_TYPE_DIRECT_URL = "direct_url"
+    SOURCE_TYPE_DIRECT_URL = (
+        "direct_url"
+    )
 
-    SOURCE_TYPE_SEARCH = "search"
+    SOURCE_TYPE_SEARCH = (
+        "search"
+    )
 
     SUPPORTED_SOURCE_TYPES = {
         SOURCE_TYPE_DIRECT_URL,
         SOURCE_TYPE_SEARCH,
     }
 
+
     # ==================================================
     # Providers
     # ==================================================
 
-    PROVIDER_GOOGLE_SEARCH = "google_search"
+    PROVIDER_GOOGLE_SEARCH = (
+        "google_search"
+    )
 
-    PROVIDER_GOOGLE_NEWS = "google_news"
+    PROVIDER_GOOGLE_NEWS = (
+        "google_news"
+    )
 
     SUPPORTED_PROVIDERS = {
         PROVIDER_GOOGLE_SEARCH,
         PROVIDER_GOOGLE_NEWS,
     }
+
 
     # ==================================================
     # Constructor
@@ -144,7 +188,7 @@ class SourceResolutionBridge:
 
     def __init__(
         self,
-        google_search_provider=None,
+        generic_search_provider=None,
         google_news_provider=None,
     ):
         """
@@ -154,19 +198,28 @@ class SourceResolutionBridge:
         使用預設 Provider。
         """
 
-        if google_search_provider is None:
+        # ----------------------------------------------
+        # Generic Search
+        # ----------------------------------------------
 
-            google_search_provider = (
-                GoogleSearchProvider()
+        if generic_search_provider is None:
+
+            generic_search_provider = (
+                GenericSearchProvider()
             )
 
         self._validate_provider_instance(
-            google_search_provider
+            generic_search_provider
         )
 
-        self.google_search_provider = (
-            google_search_provider
+        self.generic_search_provider = (
+            generic_search_provider
         )
+
+
+        # ----------------------------------------------
+        # Google News
+        # ----------------------------------------------
 
         if google_news_provider is None:
 
@@ -181,6 +234,7 @@ class SourceResolutionBridge:
         self.google_news_provider = (
             google_news_provider
         )
+
 
     # ==================================================
     # Resolve
@@ -224,6 +278,7 @@ class SourceResolutionBridge:
             f"Unsupported source type: "
             f"{source_type}"
         )
+
 
     # ==================================================
     # Resolve Direct URL
@@ -282,6 +337,7 @@ class SourceResolutionBridge:
                 url,
         }
 
+
     # ==================================================
     # Resolve Search
     # ==================================================
@@ -306,17 +362,27 @@ class SourceResolutionBridge:
             site
               ↓
             url
+
+            crawler_url
+              ↓
+            crawler_url
+
+            ↓
+            ProviderSearchAdapter
+              ↓
+            GenericSearchProvider
+
+        Google News：
+
+            keyword
               ↓
             ProviderSearchAdapter
               ↓
-            GoogleSearchProvider
+            GoogleNewsProvider
 
-        注意：
+        本方法不執行：
 
-            本方法不執行 adapter.search()。
-
-            本方法只負責解析與保存
-            Search Execution 所需的參數。
+            adapter.search()
         """
 
         self._validate_definition(
@@ -331,6 +397,7 @@ class SourceResolutionBridge:
                 "Source definition must be "
                 "a search source"
             )
+
 
         # ==================================================
         # Keyword
@@ -355,6 +422,7 @@ class SourceResolutionBridge:
             raise ValueError(
                 "Search source requires keyword"
             )
+
 
         # ==================================================
         # Provider
@@ -389,24 +457,21 @@ class SourceResolutionBridge:
                 f"{provider_name}"
             )
 
+
         # ==================================================
         # URL / Site
         # ==================================================
 
         """
-        TargetSourceService 對：
-
-            URL + Keyword
-
-        產生：
+        TargetSourceService：
 
             site = url
 
-        Provider 層統一使用：
+        Provider 層：
 
             url
 
-        因此這裡：
+        因此：
 
             site → url
         """
@@ -427,6 +492,28 @@ class SourceResolutionBridge:
 
                 url = site
 
+
+        # ==================================================
+        # Crawler URL
+        # ==================================================
+
+        crawler_url = (
+            source_definition.get(
+                "crawler_url"
+            )
+        )
+
+        if crawler_url is not None:
+
+            crawler_url = str(
+                crawler_url
+            ).strip()
+
+            if not crawler_url:
+
+                crawler_url = None
+
+
         # ==================================================
         # Provider
         # ==================================================
@@ -434,6 +521,7 @@ class SourceResolutionBridge:
         provider = self.resolve_provider(
             provider_name
         )
+
 
         # ==================================================
         # Adapter
@@ -443,6 +531,7 @@ class SourceResolutionBridge:
             provider,
             search_source=provider_name,
         )
+
 
         # ==================================================
         # Search Source Identity
@@ -458,6 +547,7 @@ class SourceResolutionBridge:
 
             search_source = provider_name
 
+
         # ==================================================
         # Result Limit
         # ==================================================
@@ -467,6 +557,7 @@ class SourceResolutionBridge:
             "max_results",
             None,
         )
+
 
         # ==================================================
         # Resolved Source
@@ -495,42 +586,31 @@ class SourceResolutionBridge:
                 max_results,
         }
 
+
         # ==================================================
         # URL Forwarding
         # ==================================================
 
-        """
-        只有存在 site 時才加入 url。
-
-        因此：
-
-            Google Search + site
-
-                ↓
-
-            {
-                ...
-                "url": "https://..."
-            }
-
-            Google Search without site
-
-                ↓
-
-            不加入 url
-
-            Google News
-
-                ↓
-
-            通常不會有 url
-        """
-
         if url:
 
-            resolved_source["url"] = url
+            resolved_source[
+                "url"
+            ] = url
+
+
+        # ==================================================
+        # Crawler URL Forwarding
+        # ==================================================
+
+        if crawler_url:
+
+            resolved_source[
+                "crawler_url"
+            ] = crawler_url
+
 
         return resolved_source
+
 
     # ==================================================
     # Resolve Provider
@@ -573,13 +653,23 @@ class SourceResolutionBridge:
                 f"{provider_name}"
             )
 
+
+        # ----------------------------------------------
+        # Google Search
+        # ----------------------------------------------
+
         if provider_name == (
             self.PROVIDER_GOOGLE_SEARCH
         ):
 
             return (
-                self.google_search_provider
+                self.generic_search_provider
             )
+
+
+        # ----------------------------------------------
+        # Google News
+        # ----------------------------------------------
 
         if provider_name == (
             self.PROVIDER_GOOGLE_NEWS
@@ -589,10 +679,12 @@ class SourceResolutionBridge:
                 self.google_news_provider
             )
 
+
         raise ValueError(
             f"Unsupported search provider: "
             f"{provider_name}"
         )
+
 
     # ==================================================
     # Create Provider Adapter
@@ -621,6 +713,7 @@ class SourceResolutionBridge:
             search_source=search_source,
             max_results=max_results,
         )
+
 
     # ==================================================
     # Get Adapter
@@ -680,6 +773,7 @@ class SourceResolutionBridge:
 
         return adapter
 
+
     # ==================================================
     # Get Provider
     # ==================================================
@@ -714,6 +808,7 @@ class SourceResolutionBridge:
 
         return provider
 
+
     # ==================================================
     # Get Provider Name
     # ==================================================
@@ -747,6 +842,7 @@ class SourceResolutionBridge:
             )
 
         return provider
+
 
     # ==================================================
     # Get Search Source
@@ -790,6 +886,7 @@ class SourceResolutionBridge:
             "requires search_source"
         )
 
+
     # ==================================================
     # Get URL
     # ==================================================
@@ -801,14 +898,14 @@ class SourceResolutionBridge:
         """
         取得 Search URL。
 
-        URL 來源：
+        Source Definition：
 
-            TargetSourceService
-                ↓
             site
                 ↓
-            SourceResolutionBridge
-                ↓
+            url
+
+        Resolved Source：
+
             url
         """
 
@@ -839,6 +936,49 @@ class SourceResolutionBridge:
 
         return url
 
+
+    # ==================================================
+    # Get Crawler URL
+    # ==================================================
+
+    @staticmethod
+    def get_crawler_url(
+        resolved_source,
+    ):
+        """
+        取得 Crawler URL。
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be a dict"
+            )
+
+        crawler_url = (
+            resolved_source.get(
+                "crawler_url"
+            )
+        )
+
+        if crawler_url is None:
+
+            return None
+
+        crawler_url = str(
+            crawler_url
+        ).strip()
+
+        if not crawler_url:
+
+            return None
+
+        return crawler_url
+
+
     # ==================================================
     # Is Direct URL
     # ==================================================
@@ -862,6 +1002,7 @@ class SourceResolutionBridge:
             == self.SOURCE_TYPE_DIRECT_URL
         )
 
+
     # ==================================================
     # Is Search
     # ==================================================
@@ -884,6 +1025,7 @@ class SourceResolutionBridge:
             )
             == self.SOURCE_TYPE_SEARCH
         )
+
 
     # ==================================================
     # Is Supported Provider
@@ -913,6 +1055,7 @@ class SourceResolutionBridge:
             provider_name
             in self.SUPPORTED_PROVIDERS
         )
+
 
     # ==================================================
     # Validation
@@ -955,6 +1098,7 @@ class SourceResolutionBridge:
                 f"Unsupported source type: "
                 f"{source_type}"
             )
+
 
     # ==================================================
     # Provider Validation

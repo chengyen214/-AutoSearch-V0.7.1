@@ -45,6 +45,7 @@ P5.6.3 負責：
     - Adapter Resolution
     - Keyword Resolution
     - URL / Site Resolution
+    - Crawler URL Resolution
     - Search Execution
     - Result Limit Resolution
     - Search Result Normalization
@@ -79,7 +80,10 @@ P5.6.2 SourceResolutionBridge：
         ↓
     Search Adapter
         ↓
-    site → Resolved Source
+    site → url
+    crawler_url → crawler_url
+    ↓
+    Resolved Source
 
 
 回答：
@@ -92,7 +96,8 @@ P5.6.3 SearchExecutionBridge：
     Resolved Adapter
         ↓
     keyword
-    optional site/url
+    optional url
+    optional crawler_url
         ↓
     adapter.search()
 
@@ -107,14 +112,14 @@ URL + Keyword：
     TargetSourceService
         ↓
     site
+    crawler_url
         ↓
     SourceResolutionBridge
         ↓
-    site
+    url
+    crawler_url
         ↓
     SearchExecutionBridge
-        ↓
-    url
         ↓
     ProviderSearchAdapter
         ↓
@@ -123,9 +128,9 @@ URL + Keyword：
 
 Google Search：
 
-    keyword + site/url
+    keyword + url + crawler_url
         ↓
-    site:domain keyword
+    ProviderSearchAdapter
         ↓
     Google Search
 
@@ -146,6 +151,9 @@ Google News：
     - Provider Resolution
     - Adapter Creation
     - Provider API / RSS Implementation
+    - Crawler
+    - Parser
+    - Article Persistence
 """
 
 
@@ -186,6 +194,7 @@ class SearchExecutionBridge:
 
         Keyword Resolution
         Site / URL Resolution
+        Crawler URL Resolution
         Search Execution
         Result Normalization
 
@@ -194,8 +203,6 @@ class SearchExecutionBridge:
 
         URL + Keyword
 
-            resolved_source["site"]
-                    ↓
             resolved_source["url"]
                     ↓
             adapter.search(
@@ -204,18 +211,35 @@ class SearchExecutionBridge:
             )
 
 
-        若 resolved_source 已經提供：
+    Crawler URL 規則：
 
-            resolved_source["url"]
-
-        則直接使用。
-
-
-        Google News：
-
-            沒有 site/url
-
+        resolved_source["crawler_url"]
                     ↓
+            adapter.search(
+                keyword,
+                crawler_url=crawler_url,
+            )
+
+
+        注意：
+
+            crawler_url 與 url
+            是兩個不同欄位。
+
+            本 Bridge 不修改 crawler_url。
+
+            本 Bridge 只負責：
+
+                取得
+                    ↓
+                傳遞
+
+
+    Google News：
+
+        沒有 url / crawler_url
+
+                ↓
 
             adapter.search(
                 keyword,
@@ -308,18 +332,22 @@ class SearchExecutionBridge:
             "adapter":
                 ProviderSearchAdapter(),
 
-            "site":
+            "url":
+                "https://example.com",
+
+            "crawler_url":
                 "https://example.com"
         }
 
 
         URL + Keyword：
 
-            keyword + site
+            keyword + url + crawler_url
                 ↓
             adapter.search(
                 keyword,
-                url=site,
+                url=url,
+                crawler_url=crawler_url,
             )
 
 
@@ -376,6 +404,28 @@ class SearchExecutionBridge:
 
         # ----------------------------------------------
         #
+        # Crawler URL
+        #
+        # IMPORTANT
+        #
+        # crawler_url 與 url 分開。
+        #
+        # crawler_url 不由 Bridge 修改。
+        #
+        # 只負責從 resolved_source
+        # 取得並往下傳遞。
+        #
+        # ----------------------------------------------
+
+        crawler_url = (
+            self.get_crawler_url(
+                resolved_source
+            )
+        )
+
+
+        # ----------------------------------------------
+        #
         # Existing Adapter
         #
         # ----------------------------------------------
@@ -417,6 +467,29 @@ class SearchExecutionBridge:
 
         # ----------------------------------------------
         #
+        # Crawler URL Forwarding
+        #
+        # IMPORTANT
+        #
+        # crawler_url 必須繼續傳遞。
+        #
+        # 不修改。
+        #
+        # 不轉換成 url。
+        #
+        # 不覆蓋 url。
+        #
+        # ----------------------------------------------
+
+        if crawler_url:
+
+            search_kwargs[
+                "crawler_url"
+            ] = crawler_url
+
+
+        # ----------------------------------------------
+        #
         # Search Execution Debug Information
         #
         # ----------------------------------------------
@@ -431,6 +504,10 @@ class SearchExecutionBridge:
 
         print(
             f"  url     = {url}"
+        )
+
+        print(
+            f"  crawler_url = {crawler_url}"
         )
 
         print(
@@ -630,18 +707,13 @@ class SearchExecutionBridge:
                 ↓
             SourceResolutionBridge
                 ↓
-            site
+            url
 
 
         SearchExecutionBridge 必須將：
 
-            site
-                ↓
             url
-
-
-        再傳給：
-
+                ↓
             adapter.search(
                 keyword,
                 url=url,
@@ -739,6 +811,92 @@ class SearchExecutionBridge:
         # ----------------------------------------------
 
         return None
+
+
+    # ==================================================
+    #
+    # Get Crawler URL
+    #
+    # ==================================================
+
+    @staticmethod
+    def get_crawler_url(
+        resolved_source,
+    ):
+        """
+        取得 Crawler URL。
+
+
+        SourceResolutionBridge：
+
+            crawler_url
+                ↓
+            Resolved Source
+                ↓
+            SearchExecutionBridge
+                ↓
+            ProviderSearchAdapter
+
+
+        IMPORTANT：
+
+            crawler_url 不修改。
+
+            crawler_url 不轉換。
+
+            crawler_url 不覆蓋 url。
+
+
+        Google Search：
+
+            crawler_url
+                ↓
+            adapter.search(
+                keyword,
+                crawler_url=crawler_url,
+            )
+
+
+        Google News：
+
+            沒有 crawler_url
+                ↓
+            不傳遞。
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be dict"
+            )
+
+
+        crawler_url = (
+            resolved_source.get(
+                "crawler_url"
+            )
+        )
+
+
+        if crawler_url is None:
+
+            return None
+
+
+        crawler_url = str(
+            crawler_url
+        ).strip()
+
+
+        if not crawler_url:
+
+            return None
+
+
+        return crawler_url
 
 
     # ==================================================
@@ -1027,11 +1185,11 @@ class SearchExecutionBridge:
             )
 
 
-    # ==================================================
-    #
-    # Default Bridge
-    #
-    # ==================================================
+# ==================================================
+#
+# Default Bridge
+#
+# ==================================================
 
 default_search_execution_bridge = (
     SearchExecutionBridge()

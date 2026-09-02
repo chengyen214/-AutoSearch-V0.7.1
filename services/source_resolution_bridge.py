@@ -3,95 +3,82 @@ services/source_resolution_bridge.py
 
 AutoSearch V5
 
-V5.6.2
+V5.6.5
 
 Source Resolution Bridge
 
-
 用途：
 
-    將 TargetSourceService
+    將 V5 TargetSourceService
     產生的 Source Definition
+    解析成實際可執行的 Search Provider / Adapter。
 
-    解析成 Pipeline 使用的
-    Resolved Source。
-
-
-Pipeline:
-
-    Target
-
-        ↓
-
-    TargetSourceService
-
-        ↓
+責任：
 
     Source Definition
-
         ↓
+    Provider Resolution
+        ↓
+    ProviderSearchAdapter
 
+本模組不執行 Search。
+
+URL + Keyword Search：
+
+    TargetSourceService
+        ↓
+        site
+        crawler_url
+        ↓
     SourceResolutionBridge
-
         ↓
-
-    Resolved Source
-
-
-負責：
-
-    - Source Definition Resolution
-    - Source Type Resolution
-    - Search Provider Resolution
-    - Provider Registry
-    - Provider Adapter Binding
-
-
-不負責：
-
-    - Target CRUD
-    - Target Validation
-    - Search Execution
-    - adapter.search()
-    - SearchResult Processing
-    - URL Deduplication
-    - Crawl
-    - Parser
-    - Article
-    - Archive
-    - AI
-    - Job
-    - Scheduler
+        url
+        crawler_url
+        ↓
+    ProviderSearchAdapter
+        ↓
+    GenericSearchProvider
 
 
 設計原則：
 
-    P5.6.2：
+    URL + Keyword：
 
-        「這個 Source Definition
-         要由哪個 Provider / Adapter 執行？」
+        site → url
+        crawler_url → crawler_url
 
+    Search Provider：
 
-    P5.6.3：
+        generic_search
+        google_news
 
-        「Search 實際如何執行。」
+    Generic Search：
 
+        generic_search
 
-Search Execution:
+        ↓
 
-    SourceResolutionBridge
+        GenericSearchProvider
 
-            ↓
+    Google News：
 
-    ProviderSearchAdapter
+        google_news
 
-            ↓
+        ↓
 
-    SearchExecutionBridge
+        GoogleNewsProvider
 
-            ↓
+本模組不負責：
 
-    adapter.search()
+    - adapter.search()
+    - Search API
+    - Google News RSS
+    - URL Deduplication
+    - Crawler
+    - Parser
+    - Article
+    - Archive
+    - AI
 """
 
 
@@ -106,8 +93,8 @@ from search.search_provider import (
 )
 
 
-from search.google_search_provider import (
-    GoogleSearchProvider,
+from search.generic_search_provider import (
+    GenericSearchProvider,
 )
 
 
@@ -121,209 +108,148 @@ from search.provider_adapter import (
 )
 
 
+# ==================================================
+#
+# Source Resolution Bridge
+#
+# ==================================================
 
 class SourceResolutionBridge:
     """
-    Source Resolution Bridge。
+    V5.6.5 Source Resolution Bridge。
 
-
-    Source Definition:
-
-        {
-            "source_type":
-                "search",
-
-            "keyword":
-                "AI",
-
-            "provider":
-                "google_search",
-
-            "site":
-                "https://example.com"
-        }
-
-
-    Resolution:
+    只負責：
 
         Source Definition
-
-                ↓
-
+            ↓
         Provider
-
-                ↓
-
+            ↓
         ProviderSearchAdapter
 
+    並保留：
 
-    本類別不執行 Search。
+        site
+          ↓
+        url
+
+        crawler_url
+          ↓
+        crawler_url
+
+    給後續 Search Execution / Crawl Pipeline 使用。
+
+    不負責：
+
+        adapter.search()
     """
 
 
-
     # ==================================================
-    #
     # Source Types
-    #
     # ==================================================
 
     SOURCE_TYPE_DIRECT_URL = (
         "direct_url"
     )
 
-
     SOURCE_TYPE_SEARCH = (
         "search"
     )
 
-
     SUPPORTED_SOURCE_TYPES = {
-
         SOURCE_TYPE_DIRECT_URL,
-
         SOURCE_TYPE_SEARCH,
-
     }
 
 
-
     # ==================================================
-    #
-    # Provider Names
-    #
+    # Providers
     # ==================================================
 
-    PROVIDER_GOOGLE_SEARCH = (
-        "google_search"
+    # ----------------------------------------------
+    # Generic Search
+    # ----------------------------------------------
+
+    PROVIDER_GENERIC_SEARCH = (
+        "generic_search"
     )
 
+
+    # ----------------------------------------------
+    # Google News
+    # ----------------------------------------------
 
     PROVIDER_GOOGLE_NEWS = (
         "google_news"
     )
 
 
+    # ----------------------------------------------
+    # Supported Providers
+    # ----------------------------------------------
 
     SUPPORTED_PROVIDERS = {
-
-        PROVIDER_GOOGLE_SEARCH,
-
+        PROVIDER_GENERIC_SEARCH,
         PROVIDER_GOOGLE_NEWS,
-
     }
 
 
-
     # ==================================================
-    #
     # Constructor
-    #
     # ==================================================
 
     def __init__(
         self,
-        providers=None,
+        generic_search_provider=None,
+        google_news_provider=None,
     ):
         """
         建立 SourceResolutionBridge。
 
-
-        providers:
-
-            Provider Registry
-
-
-        Example:
-
-
-        {
-            "google_search":
-                GoogleSearchProvider(),
-
-            "google_news":
-                GoogleNewsProvider(),
-        }
-
-
-        若沒有提供：
-
-            使用 Default Registry。
+        若未注入 Provider，
+        使用預設 Provider。
         """
 
+        # ----------------------------------------------
+        # Generic Search
+        # ----------------------------------------------
 
+        if generic_search_provider is None:
 
-        if providers is None:
-
-            providers = (
-
-                self._create_default_registry()
-
+            generic_search_provider = (
+                GenericSearchProvider()
             )
 
+        self._validate_provider_instance(
+            generic_search_provider
+        )
 
-
-        if not isinstance(
-            providers,
-            dict,
-        ):
-
-            raise TypeError(
-                "providers must be dict"
-            )
-
-
-
-        self.providers = (
-
-            self._normalize_provider_registry(
-                providers
-            )
-
+        self.generic_search_provider = (
+            generic_search_provider
         )
 
 
+        # ----------------------------------------------
+        # Google News
+        # ----------------------------------------------
 
-    # ==================================================
-    #
-    # Default Provider Registry
-    #
-    # ==================================================
+        if google_news_provider is None:
 
-    @staticmethod
-    def _create_default_registry():
-        """
-        建立預設 Provider Registry。
+            google_news_provider = (
+                GoogleNewsProvider()
+            )
 
+        self._validate_provider_instance(
+            google_news_provider
+        )
 
-        P5.6.2 支援：
-
-
-            google_search
-
-            google_news
-        """
-
-
-        return {
-
-            "google_search":
-
-                GoogleSearchProvider(),
-
-
-            "google_news":
-
-                GoogleNewsProvider(),
-
-        }
-
+        self.google_news_provider = (
+            google_news_provider
+        )
 
 
     # ==================================================
-    #
     # Resolve
-    #
     # ==================================================
 
     def resolve(
@@ -331,65 +257,34 @@ class SourceResolutionBridge:
         source_definition,
     ):
         """
-        Source Definition
-
-                ↓
-
-        Resolved Source
+        Source Definition Resolution。
         """
-
-
 
         self._validate_definition(
             source_definition
         )
 
-
-
         source_type = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "source_type"
-                )
+            source_definition.get(
+                "source_type"
             )
-            .lower()
-
         )
 
-
-
         if source_type == (
-
             self.SOURCE_TYPE_DIRECT_URL
-
         ):
 
-            return (
-
-                self.resolve_direct_url(
-                    source_definition
-                )
-
+            return self.resolve_direct_url(
+                source_definition
             )
-
-
 
         if source_type == (
-
             self.SOURCE_TYPE_SEARCH
-
         ):
 
-            return (
-
-                self.resolve_search(
-                    source_definition
-                )
-
+            return self.resolve_search(
+                source_definition
             )
-
-
 
         raise ValueError(
             f"Unsupported source type: "
@@ -397,11 +292,8 @@ class SourceResolutionBridge:
         )
 
 
-
     # ==================================================
-    #
-    # Direct URL Resolution
-    #
+    # Resolve Direct URL
     # ==================================================
 
     def resolve_direct_url(
@@ -409,87 +301,57 @@ class SourceResolutionBridge:
         source_definition,
     ):
         """
-        Direct URL Resolution。
+        Resolve Direct URL。
 
-
-        只保留 URL。
-
-
-        不：
-
-            Crawl
-
-            HTTP Request
-
-            Parser
+        不建立 Provider。
+        不建立 Adapter。
+        不執行 HTTP。
         """
 
-
-
-        url = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "url"
-                )
-            )
-
+        self._validate_definition(
+            source_definition
         )
 
+        if source_definition.get(
+            "source_type"
+        ) != self.SOURCE_TYPE_DIRECT_URL:
 
+            raise ValueError(
+                "Source definition must be "
+                "a direct_url source"
+            )
+
+        url = source_definition.get(
+            "url"
+        )
+
+        if url is None:
+
+            raise ValueError(
+                "Direct URL source requires url"
+            )
+
+        url = str(
+            url
+        ).strip()
 
         if not url:
 
             raise ValueError(
-                "direct_url requires url"
+                "Direct URL source requires url"
             )
 
-
-
-        resolved = {
-
+        return {
             "source_type":
-
                 self.SOURCE_TYPE_DIRECT_URL,
 
-
             "url":
-
                 url,
-
         }
 
 
-
-        target_type = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "target_type"
-                )
-            )
-            .lower()
-
-        )
-
-
-
-        if target_type:
-
-            resolved[
-                "target_type"
-            ] = target_type
-
-
-
-        return resolved
-
-
-
     # ==================================================
-    #
-    # Search Resolution
-    #
+    # Resolve Search
     # ==================================================
 
     def resolve_search(
@@ -497,181 +359,311 @@ class SourceResolutionBridge:
         source_definition,
     ):
         """
-        Search Resolution。
+        Resolve Search Source。
 
+        Pipeline：
 
-        Input:
+            Source Definition
+                    ↓
+                Provider
+                    ↓
+            ProviderSearchAdapter
 
+        URL + Keyword：
 
-        {
-            source_type:
-                "search",
+            site
+              ↓
+            url
 
-            keyword:
-                "AI",
+            crawler_url
+              ↓
+            crawler_url
 
-            provider:
-                "google_search",
+            ↓
+            ProviderSearchAdapter
+              ↓
+            GenericSearchProvider
 
-            site:
-                "https://example.com"
-        }
+        Generic Search：
 
+            keyword
+            +
+            optional url
 
-        Output:
+            ↓
+            GenericSearchProvider
 
-        {
-            provider_instance:
+        Google News：
 
-            adapter:
-        }
+            keyword
 
+            ↓
+            GoogleNewsProvider
 
-        不執行：
+        本方法不執行：
 
             adapter.search()
         """
 
-
-
-        keyword = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "keyword"
-                )
-            )
-
+        self._validate_definition(
+            source_definition
         )
 
+        if source_definition.get(
+            "source_type"
+        ) != self.SOURCE_TYPE_SEARCH:
 
+            raise ValueError(
+                "Source definition must be "
+                "a search source"
+            )
+
+
+        # ==================================================
+        # Keyword
+        # ==================================================
+
+        keyword = source_definition.get(
+            "keyword"
+        )
+
+        if keyword is None:
+
+            raise ValueError(
+                "Search source requires keyword"
+            )
+
+        keyword = str(
+            keyword
+        ).strip()
 
         if not keyword:
 
             raise ValueError(
-                "search requires keyword"
+                "Search source requires keyword"
             )
 
 
+        # ==================================================
+        # Provider
+        # ==================================================
 
-        provider_name = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "provider"
-                )
-            )
-            .lower()
-
+        provider_name = source_definition.get(
+            "provider"
         )
 
+        if provider_name is None:
 
+            raise ValueError(
+                "Search source requires provider"
+            )
+
+        provider_name = str(
+            provider_name
+        ).strip()
 
         if not provider_name:
 
             raise ValueError(
-                "search requires provider"
+                "Search source requires provider"
             )
 
 
+        # ----------------------------------------------
+        # IMPORTANT
+        #
+        # TargetSourceService 目前使用：
+        #
+        #     provider = generic_search
+        #
+        # 因此 generic_search 必須是正式支援的
+        # Provider Identity。
+        # ----------------------------------------------
 
-        provider = (
+        if not self.is_supported_provider(
+            provider_name
+        ):
 
-            self.resolve_provider(
-                provider_name
+            raise ValueError(
+                f"Unsupported search provider: "
+                f"{provider_name}"
             )
 
+
+        # ==================================================
+        # URL / Site
+        # ==================================================
+
+        """
+        TargetSourceService：
+
+            site = url
+
+        Provider 層：
+
+            url
+
+        因此：
+
+            site → url
+        """
+
+        site = source_definition.get(
+            "site"
+        )
+
+        url = None
+
+        if site is not None:
+
+            site = str(
+                site
+            ).strip()
+
+            if site:
+
+                url = site
+
+
+        # ==================================================
+        # Crawler URL
+        # ==================================================
+
+        crawler_url = (
+            source_definition.get(
+                "crawler_url"
+            )
+        )
+
+        if crawler_url is not None:
+
+            crawler_url = str(
+                crawler_url
+            ).strip()
+
+            if not crawler_url:
+
+                crawler_url = None
+
+
+        # ==================================================
+        # Provider
+        # ==================================================
+
+        provider = self.resolve_provider(
+            provider_name
         )
 
 
+        # ==================================================
+        # Adapter
+        # ==================================================
 
-        site = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "site"
-                )
-            )
-
+        adapter = self.create_provider_adapter(
+            provider,
+            search_source=provider_name,
         )
 
 
-        adapter = (
+        # ==================================================
+        # Search Source Identity
+        # ==================================================
 
-            self.create_adapter(
-                provider,
-                provider_name,
-            )
+        search_source = getattr(
+            adapter,
+            "search_source",
+            None,
+        )
 
+        if not search_source:
+
+            search_source = provider_name
+
+
+        # ==================================================
+        # Result Limit
+        # ==================================================
+
+        max_results = getattr(
+            adapter,
+            "max_results",
+            None,
         )
 
 
+        # ==================================================
+        # Resolved Source
+        # ==================================================
 
-        resolved = {
-
-
+        resolved_source = {
             "source_type":
-
                 self.SOURCE_TYPE_SEARCH,
 
-
             "keyword":
-
                 keyword,
 
-
             "provider":
-
                 provider_name,
 
-
             "provider_instance":
-
                 provider,
 
-
             "adapter":
-
                 adapter,
 
+            "search_source":
+                search_source,
+
+            "max_results":
+                max_results,
         }
 
 
+        # ==================================================
+        # URL Forwarding
+        # ==================================================
 
-        if site:
+        if url:
 
-            resolved[
-                "site"
-            ] = site
-
-
-
-        target_type = (
-
-            self._normalize_string(
-                source_definition.get(
-                    "target_type"
-                )
-            )
-            .lower()
-
-        )
+            resolved_source[
+                "url"
+            ] = url
 
 
+        # ==================================================
+        # Crawler URL Forwarding
+        #
+        # IMPORTANT：
+        #
+        # 這裡只保留 crawler_url。
+        #
+        # 後續：
+        #
+        # SearchExecutionBridge
+        #       ↓
+        # ProviderSearchAdapter
+        #       ↓
+        # SearchResult[]
+        #       ↓
+        # JobExecutorBridge
+        #       ↓
+        # CrawlService.crawl_result(search_result)
+        #
+        # 不在這裡執行 Crawl。
+        # ==================================================
 
-        if target_type:
+        if crawler_url:
 
-            resolved[
-                "target_type"
-            ] = target_type
+            resolved_source[
+                "crawler_url"
+            ] = crawler_url
 
 
+        return resolved_source
 
-        return resolved
+
     # ==================================================
-    #
     # Resolve Provider
-    #
     # ==================================================
 
     def resolve_provider(
@@ -680,337 +672,122 @@ class SourceResolutionBridge:
     ):
         """
         Provider Name
-
-                ↓
-
+            ↓
         Provider Instance
 
+        不執行 Search。
 
-        不執行：
+        Provider Mapping：
 
-            provider.search()
+            generic_search
+                ↓
+            GenericSearchProvider
+
+            google_news
+                ↓
+            GoogleNewsProvider
         """
 
-        provider_name = (
-            self._normalize_string(
-                provider_name
-            )
-            .lower()
-        )
+        if provider_name is None:
 
+            raise ValueError(
+                "provider_name cannot be None"
+            )
+
+        provider_name = str(
+            provider_name
+        ).strip()
 
         if not provider_name:
 
             raise ValueError(
-                "provider_name required"
+                "provider_name cannot be empty"
             )
 
-
-        provider = (
-            self.providers.get(
-                provider_name
-            )
-        )
-
-
-        if provider is None:
+        if not self.is_supported_provider(
+            provider_name
+        ):
 
             raise ValueError(
-                f"Unsupported provider: "
+                f"Unsupported search provider: "
                 f"{provider_name}"
             )
 
 
-        self._validate_provider_instance(
-            provider
+        # ----------------------------------------------
+        # Generic Search
+        # ----------------------------------------------
+
+        if provider_name == (
+            self.PROVIDER_GENERIC_SEARCH
+        ):
+
+            return (
+                self.generic_search_provider
+            )
+
+
+        # ----------------------------------------------
+        # Google News
+        # ----------------------------------------------
+
+        if provider_name == (
+            self.PROVIDER_GOOGLE_NEWS
+        ):
+
+            return (
+                self.google_news_provider
+            )
+
+
+        raise ValueError(
+            f"Unsupported search provider: "
+            f"{provider_name}"
         )
 
 
-        return provider
-
-
-
     # ==================================================
-    #
-    # Create Adapter
-    #
+    # Create Provider Adapter
     # ==================================================
 
     @staticmethod
-    def create_adapter(
+    def create_provider_adapter(
         provider,
         search_source=None,
+        max_results=None,
     ):
         """
         Provider
-
             ↓
-
         ProviderSearchAdapter
 
-
-        P5.6.2：
-
-            建立 Adapter
-
-
-        P5.6.3：
-
-            執行 adapter.search()
+        不執行 Search。
         """
-
 
         SourceResolutionBridge._validate_provider_instance(
             provider
         )
-
-
-        if search_source is not None:
-
-            search_source = (
-                str(
-                    search_source
-                )
-                .strip()
-            )
-
-
-            if not search_source:
-
-                search_source = None
-
-
 
         return ProviderSearchAdapter(
             provider=provider,
             search_source=search_source,
-        )
-
-
-
-    # ==================================================
-    #
-    # Provider Registry
-    #
-    # ==================================================
-
-    def register_provider(
-        self,
-        name,
-        provider,
-    ):
-        """
-        Register Provider。
-        """
-
-
-        name = (
-            self._normalize_string(
-                name
-            )
-            .lower()
-        )
-
-
-        if not name:
-
-            raise ValueError(
-                "provider name required"
-            )
-
-
-        self._validate_provider_instance(
-            provider
-        )
-
-
-        self.providers[
-            name
-        ] = provider
-
-
-
-    def unregister_provider(
-        self,
-        name,
-    ):
-        """
-        Remove Provider。
-        """
-
-
-        name = (
-            self._normalize_string(
-                name
-            )
-            .lower()
-        )
-
-
-        if name in self.providers:
-
-            del self.providers[
-                name
-            ]
-
-
-
-    def has_provider(
-        self,
-        provider_name,
-    ):
-        """
-        Provider existence check。
-        """
-
-
-        provider_name = (
-            self._normalize_string(
-                provider_name
-            )
-            .lower()
-        )
-
-
-        return (
-            provider_name
-            in self.providers
-        )
-
-
-
-    def list_providers(
-        self,
-    ):
-        """
-        List Provider Names。
-        """
-
-
-        return list(
-            self.providers.keys()
+            max_results=max_results,
         )
 
 
     # ==================================================
-    #
-    # Source Type Checker
-    #
+    # Get Adapter
     # ==================================================
-
-    @staticmethod
-    def is_direct_url(
-        resolved_source,
-    ):
-        """
-        判斷是否 Direct URL Source。
-        """
-
-        if not isinstance(
-            resolved_source,
-            dict,
-        ):
-            raise TypeError(
-                "resolved_source must be dict"
-            )
-
-
-        return (
-            resolved_source.get(
-                "source_type"
-            )
-            ==
-            SourceResolutionBridge.SOURCE_TYPE_DIRECT_URL
-        )
-
-
-
-    @staticmethod
-    def is_search(
-        resolved_source,
-    ):
-        """
-        判斷是否 Search Source。
-        """
-
-        if not isinstance(
-            resolved_source,
-            dict,
-        ):
-            raise TypeError(
-                "resolved_source must be dict"
-            )
-
-
-        return (
-            resolved_source.get(
-                "source_type"
-            )
-            ==
-            SourceResolutionBridge.SOURCE_TYPE_SEARCH
-        )
-
-
-    # ==================================================
-    #
-    # Getter
-    #
-    # ==================================================
-
-    @staticmethod
-    def get_provider(
-        resolved_source,
-    ):
-        """
-        取得 Resolved Source Provider。
-        """
-
-
-        if not isinstance(
-            resolved_source,
-            dict,
-        ):
-
-            raise TypeError(
-                "resolved_source must be dict"
-            )
-
-
-        provider = (
-            resolved_source.get(
-                "provider_instance"
-            )
-        )
-
-
-        if provider is None:
-
-            raise ValueError(
-                "resolved source requires "
-                "provider_instance"
-            )
-
-
-        SourceResolutionBridge._validate_provider_instance(
-            provider
-        )
-
-
-        return provider
-
-
 
     @staticmethod
     def get_adapter(
         resolved_source,
     ):
         """
-        取得 Resolved Source Adapter。
+        取得已 Resolution 的 Adapter。
 
-
-        P5.6.3 使用。
+        不建立新的 Adapter。
         """
-
 
         if not isinstance(
             resolved_source,
@@ -1018,23 +795,28 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "resolved_source must be dict"
+                "resolved_source must be a dict"
             )
 
+        if resolved_source.get(
+            "source_type"
+        ) != SourceResolutionBridge.SOURCE_TYPE_SEARCH:
 
-        adapter = (
-            resolved_source.get(
-                "adapter"
+            raise ValueError(
+                "resolved_source must be "
+                "a search source"
             )
+
+        adapter = resolved_source.get(
+            "adapter"
         )
-
 
         if adapter is None:
 
             raise ValueError(
-                "resolved source requires adapter"
+                "resolved search source "
+                "requires adapter"
             )
-
 
         if not callable(
             getattr(
@@ -1045,25 +827,24 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "adapter requires search()"
+                "adapter must provide "
+                "a search() method"
             )
-
 
         return adapter
 
 
+    # ==================================================
+    # Get Provider
+    # ==================================================
 
     @staticmethod
-    def get_site(
+    def get_provider(
         resolved_source,
     ):
         """
-        取得 Site。
-
-
-        URL + Keyword Google Search 使用。
+        取得 Provider Instance。
         """
-
 
         if not isinstance(
             resolved_source,
@@ -1071,25 +852,273 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "resolved_source must be dict"
+                "resolved_source must be a dict"
             )
 
-
-        return (
-            SourceResolutionBridge
-            ._normalize_string(
-                resolved_source.get(
-                    "site"
-                )
-            )
+        provider = resolved_source.get(
+            "provider_instance"
         )
 
+        if provider is None:
+
+            raise ValueError(
+                "resolved search source "
+                "requires provider_instance"
+            )
+
+        return provider
 
 
     # ==================================================
-    #
+    # Get Provider Name
+    # ==================================================
+
+    @staticmethod
+    def get_provider_name(
+        resolved_source,
+    ):
+        """
+        取得 Provider Identity。
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be a dict"
+            )
+
+        provider = resolved_source.get(
+            "provider"
+        )
+
+        if not provider:
+
+            raise ValueError(
+                "resolved search source "
+                "requires provider"
+            )
+
+        return provider
+
+
+    # ==================================================
+    # Get Search Source
+    # ==================================================
+
+    @staticmethod
+    def get_search_source(
+        resolved_source,
+    ):
+        """
+        取得 Search Source Identity。
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be a dict"
+            )
+
+        search_source = resolved_source.get(
+            "search_source"
+        )
+
+        if search_source:
+
+            return search_source
+
+        provider = resolved_source.get(
+            "provider"
+        )
+
+        if provider:
+
+            return provider
+
+        raise ValueError(
+            "resolved search source "
+            "requires search_source"
+        )
+
+
+    # ==================================================
+    # Get URL
+    # ==================================================
+
+    @staticmethod
+    def get_url(
+        resolved_source,
+    ):
+        """
+        取得 Search URL。
+
+        Source Definition：
+
+            site
+                ↓
+            url
+
+        Resolved Source：
+
+            url
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be a dict"
+            )
+
+        url = resolved_source.get(
+            "url"
+        )
+
+        if url is None:
+
+            return None
+
+        url = str(
+            url
+        ).strip()
+
+        if not url:
+
+            return None
+
+        return url
+
+
+    # ==================================================
+    # Get Crawler URL
+    # ==================================================
+
+    @staticmethod
+    def get_crawler_url(
+        resolved_source,
+    ):
+        """
+        取得 Crawler URL。
+        """
+
+        if not isinstance(
+            resolved_source,
+            dict,
+        ):
+
+            raise TypeError(
+                "resolved_source must be a dict"
+            )
+
+        crawler_url = (
+            resolved_source.get(
+                "crawler_url"
+            )
+        )
+
+        if crawler_url is None:
+
+            return None
+
+        crawler_url = str(
+            crawler_url
+        ).strip()
+
+        if not crawler_url:
+
+            return None
+
+        return crawler_url
+
+
+    # ==================================================
+    # Is Direct URL
+    # ==================================================
+
+    def is_direct_url(
+        self,
+        source_definition,
+    ):
+        """
+        判斷是否為 Direct URL。
+        """
+
+        self._validate_definition(
+            source_definition
+        )
+
+        return (
+            source_definition.get(
+                "source_type"
+            )
+            == self.SOURCE_TYPE_DIRECT_URL
+        )
+
+
+    # ==================================================
+    # Is Search
+    # ==================================================
+
+    def is_search(
+        self,
+        source_definition,
+    ):
+        """
+        判斷是否為 Search。
+        """
+
+        self._validate_definition(
+            source_definition
+        )
+
+        return (
+            source_definition.get(
+                "source_type"
+            )
+            == self.SOURCE_TYPE_SEARCH
+        )
+
+
+    # ==================================================
+    # Is Supported Provider
+    # ==================================================
+
+    def is_supported_provider(
+        self,
+        provider_name,
+    ):
+        """
+        判斷 Provider 是否支援。
+        """
+
+        if provider_name is None:
+
+            return False
+
+        provider_name = str(
+            provider_name
+        ).strip()
+
+        if not provider_name:
+
+            return False
+
+        return (
+            provider_name
+            in self.SUPPORTED_PROVIDERS
+        )
+
+
+    # ==================================================
     # Validation
-    #
     # ==================================================
 
     @classmethod
@@ -1098,16 +1127,8 @@ class SourceResolutionBridge:
         source_definition,
     ):
         """
-        Source Definition Validation。
-
-
-        只確認：
-
-            dict
-
-            source_type
+        基本 Source Definition Validation。
         """
-
 
         if not isinstance(
             source_definition,
@@ -1115,26 +1136,19 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "source_definition must be dict"
+                "source_definition must be a dict"
             )
 
-
-        source_type = (
-            cls._normalize_string(
-                source_definition.get(
-                    "source_type"
-                )
-            )
-            .lower()
+        source_type = source_definition.get(
+            "source_type"
         )
-
 
         if not source_type:
 
             raise ValueError(
-                "source_type required"
+                "source_definition requires "
+                "source_type"
             )
-
 
         if source_type not in (
             cls.SUPPORTED_SOURCE_TYPES
@@ -1146,24 +1160,20 @@ class SourceResolutionBridge:
             )
 
 
+    # ==================================================
+    # Provider Validation
+    # ==================================================
 
     @staticmethod
     def _validate_provider_instance(
         provider,
     ):
         """
-        Provider Instance Validation。
+        驗證 Provider Instance。
 
-
-        不驗證：
-
-            API Key
-
-            Network
-
-            Search Result
+        不驗證 API Key。
+        不執行 Search。
         """
-
 
         if not isinstance(
             provider,
@@ -1171,9 +1181,8 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "provider must be SearchProvider"
+                "provider must be a SearchProvider"
             )
-
 
         if not callable(
             getattr(
@@ -1184,106 +1193,13 @@ class SourceResolutionBridge:
         ):
 
             raise TypeError(
-                "provider requires search()"
+                "provider must provide "
+                "a search() method"
             )
-
-
-        provider_name = (
-            SourceResolutionBridge
-            ._normalize_string(
-                getattr(
-                    provider,
-                    "provider_name",
-                    "",
-                )
-            )
-        )
-
-
-        if not provider_name:
-
-            raise ValueError(
-                "provider_name required"
-            )
-
-
-
-    @staticmethod
-    def _normalize_provider_registry(
-        providers,
-    ):
-        """
-        Normalize Provider Registry。
-        """
-
-
-        result = {}
-
-
-        for name, provider in providers.items():
-
-
-            name = (
-                SourceResolutionBridge
-                ._normalize_string(
-                    name
-                )
-                .lower()
-            )
-
-
-            if not name:
-
-                raise ValueError(
-                    "provider name required"
-                )
-
-
-            SourceResolutionBridge._validate_provider_instance(
-                provider
-            )
-
-
-            result[
-                name
-            ] = provider
-
-
-
-        return result
-
-
-
-    # ==================================================
-    #
-    # Utility
-    #
-    # ==================================================
-
-    @staticmethod
-    def _normalize_string(
-        value,
-    ):
-        """
-        Normalize String。
-        """
-
-
-        if value is None:
-
-            return ""
-
-
-        return str(
-            value
-        ).strip()
-
 
 
 # ==================================================
-#
 # Default Bridge
-#
 # ==================================================
 
 default_source_resolution_bridge = (
@@ -1291,35 +1207,16 @@ default_source_resolution_bridge = (
 )
 
 
-
 # ==================================================
-#
 # Convenience API
-#
 # ==================================================
 
 def resolve_source(
     source_definition,
 ):
     """
-    Convenience Resolver。
-
-
-    Pipeline:
-
-
-        TargetSourceService
-
-                ↓
-
-        SourceResolutionBridge
-
-                ↓
-
-        ProviderSearchAdapter
-
+    使用預設 SourceResolutionBridge。
     """
-
 
     return (
         default_source_resolution_bridge.resolve(
@@ -1328,19 +1225,12 @@ def resolve_source(
     )
 
 
-
 # ==================================================
-#
 # Public API
-#
 # ==================================================
 
 __all__ = [
-
     "SourceResolutionBridge",
-
     "default_source_resolution_bridge",
-
     "resolve_source",
-
 ]

@@ -29,12 +29,12 @@ Pipeline:
     - Provider 呼叫轉接
     - keyword forwarding
     - site/url forwarding
+    - crawler_url forwarding
     - result normalization
 
 
 不負責:
 
-    - Provider Resolution
     - Provider Registry
     - Search Execution Control
     - URL Deduplication
@@ -44,6 +44,12 @@ Pipeline:
     - AI
 """
 
+
+# ==================================================
+#
+# Imports
+#
+# ==================================================
 
 from models.search_result import (
     SearchResult,
@@ -60,6 +66,11 @@ from search.search_provider import (
 )
 
 
+# ==================================================
+#
+# Provider Search Adapter
+#
+# ==================================================
 
 class ProviderSearchAdapter(
     SearchAdapter
@@ -67,31 +78,47 @@ class ProviderSearchAdapter(
     """
     SearchProvider Adapter。
 
-
     將：
 
         SearchProvider
 
     包裝成：
 
-        SearchAdapter
+        SearchAdapter。
 
 
-    Example:
+    Keyword-only：
+
+        keyword
+            ↓
+        Provider
 
 
-        GoogleSearchProvider
+    Keyword + URL：
 
-                ↓
+        keyword
+        url
+            ↓
+        Provider
 
-        ProviderSearchAdapter
 
-                ↓
+    GenericSearchProvider：
 
-        adapter.search()
+        keyword
+        max_results
+        url
+        crawler_url
+            ↓
+        GenericSearchProvider
 
+
+    GoogleNewsProvider：
+
+        keyword
+        max_results
+            ↓
+        GoogleNewsProvider
     """
-
 
 
     # ==================================================
@@ -120,7 +147,6 @@ class ProviderSearchAdapter(
         self.provider = provider
 
 
-
         if search_source is None:
 
             search_source = getattr(
@@ -137,7 +163,6 @@ class ProviderSearchAdapter(
         )
 
 
-
         if max_results is None:
 
             max_results = getattr(
@@ -150,7 +175,6 @@ class ProviderSearchAdapter(
         self.max_results = (
             max_results
         )
-
 
 
     # ==================================================
@@ -168,26 +192,49 @@ class ProviderSearchAdapter(
         """
         Adapter Search。
 
+        將 Search Execution 所需參數
+        forwarding 到 Provider。
 
         支援：
 
-            keyword
+            Keyword only
 
-            site/url
-
-
-        Example:
-
-
-            adapter.search(
-                "AI",
-                site="https://www.tsmc.com"
-            )
+                keyword
+                    ↓
+                Provider
 
 
+            Generic Search
+
+                keyword
+                max_results
+                url
+                crawler_url
+                    ↓
+                GenericSearchProvider
+
+
+            Google News
+
+                keyword
+                max_results
+                    ↓
+                GoogleNewsProvider
+
+
+        本 Adapter：
+
+            不執行 Search Logic
+            不執行 URL Deduplication
+            不執行 Crawl
         """
 
 
+        # ==================================================
+        #
+        # Keyword
+        #
+        # ==================================================
 
         keyword = self._normalize_keyword(
             keyword
@@ -199,6 +246,11 @@ class ProviderSearchAdapter(
             return []
 
 
+        # ==================================================
+        #
+        # Result Limit
+        #
+        # ==================================================
 
         limit = (
             self._resolve_limit(
@@ -207,30 +259,183 @@ class ProviderSearchAdapter(
         )
 
 
-
-        # ----------------------------------
+        # ==================================================
         #
-        # Provider Execute
+        # Provider
         #
-        # ----------------------------------
+        # ==================================================
 
-        results = (
-            self.provider.search(
-                keyword,
-                max_results=limit,
-                **kwargs,
-            )
+        provider = (
+            self.provider
         )
 
 
+        provider_name = getattr(
+            provider,
+            "provider_name",
+            "",
+        )
+
+
+        # ==================================================
+        #
+        # URL
+        #
+        # ==================================================
+
+        url = kwargs.get(
+            "url"
+        )
+
+
+        if self._has_url(
+            url
+        ):
+
+            url = str(
+                url
+            ).strip()
+
+
+        else:
+
+            url = None
+
+
+        # ==================================================
+        #
+        # Crawler URL
+        #
+        # ==================================================
+
+        crawler_url = kwargs.get(
+            "crawler_url"
+        )
+
+
+        if self._has_url(
+            crawler_url
+        ):
+
+            crawler_url = str(
+                crawler_url
+            ).strip()
+
+
+        else:
+
+            crawler_url = None
+
+
+        # ==================================================
+        #
+        # Provider Execute
+        #
+        # ==================================================
+
+        # --------------------------------------------------
+        #
+        # GenericSearchProvider
+        #
+        # --------------------------------------------------
+
+        if provider_name == "generic_search":
+
+            results = (
+                provider.search(
+                    keyword=keyword,
+                    max_results=limit,
+                    url=url,
+                    crawler_url=crawler_url,
+                )
+            )
+
+
+        # --------------------------------------------------
+        #
+        # Other Providers
+        #
+        # --------------------------------------------------
+
+        else:
+
+            provider_kwargs = {}
+
+
+            if limit is not None:
+
+                provider_kwargs[
+                    "max_results"
+                ] = limit
+
+
+            if url is not None:
+
+                provider_kwargs[
+                    "url"
+                ] = url
+
+
+            if crawler_url is not None:
+
+                provider_kwargs[
+                    "crawler_url"
+                ] = crawler_url
+
+
+            results = (
+                provider.search(
+                    keyword,
+                    **provider_kwargs,
+                )
+            )
+
+
+        # ==================================================
+        #
+        # Result Normalize
+        #
+        # ==================================================
 
         return (
             self._normalize_results(
                 results,
                 keyword,
+                provider,
             )
         )
 
+
+    # ==================================================
+    #
+    # URL Validation
+    #
+    # ==================================================
+
+    @staticmethod
+    def _has_url(
+        url,
+    ):
+        """
+        判斷 URL 是否存在。
+        """
+
+        if url is None:
+
+            return False
+
+
+        url = str(
+            url
+        ).strip()
+
+
+        if not url:
+
+            return False
+
+
+        return True
 
 
     # ==================================================
@@ -254,7 +459,6 @@ class ProviderSearchAdapter(
         ).strip()
 
 
-
     # ==================================================
     #
     # Max Results
@@ -265,7 +469,6 @@ class ProviderSearchAdapter(
         self,
         max_results,
     ):
-
 
         if max_results is not None:
 
@@ -284,6 +487,11 @@ class ProviderSearchAdapter(
         return None
 
 
+    # ==================================================
+    #
+    # Normalize Limit
+    #
+    # ==================================================
 
     @staticmethod
     def _normalize_limit(
@@ -292,7 +500,9 @@ class ProviderSearchAdapter(
 
         try:
 
-            value = int(value)
+            value = int(
+                value
+            )
 
         except Exception:
 
@@ -307,7 +517,6 @@ class ProviderSearchAdapter(
         return value
 
 
-
     # ==================================================
     #
     # Result Normalize
@@ -318,6 +527,7 @@ class ProviderSearchAdapter(
         self,
         results,
         keyword,
+        provider=None,
     ):
 
         if results is None:
@@ -333,13 +543,36 @@ class ProviderSearchAdapter(
             return []
 
 
-
         normalized = []
 
 
+        # ----------------------------------------------
+        #
+        # Provider
+        #
+        # ----------------------------------------------
+
+        if provider is None:
+
+            provider = (
+                self.provider
+            )
+
+
+        provider_source = getattr(
+            provider,
+            "provider_name",
+            self.search_source,
+        )
+
+
+        # ----------------------------------------------
+        #
+        # Normalize
+        #
+        # ----------------------------------------------
 
         for result in results:
-
 
             if not isinstance(
                 result,
@@ -349,25 +582,24 @@ class ProviderSearchAdapter(
                 continue
 
 
-
             if not result.url:
 
                 continue
 
 
-
-            result.keyword = keyword
+            result.keyword = (
+                keyword
+            )
 
 
             result.search_source = (
-                self.search_source
+                provider_source
             )
 
 
             result.rank = (
-                len(normalized)+1
+                len(normalized) + 1
             )
-
 
 
             normalized.append(
@@ -375,9 +607,7 @@ class ProviderSearchAdapter(
             )
 
 
-
         return normalized
-
 
 
     # ==================================================
@@ -393,7 +623,11 @@ class ProviderSearchAdapter(
         return self.search_source
 
 
-
+# ==================================================
+#
+# Public API
+#
+# ==================================================
 
 __all__ = [
     "ProviderSearchAdapter",

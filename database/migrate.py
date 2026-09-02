@@ -87,7 +87,14 @@ MIGRATION_FILES = [
     # Job Repository
     # ======================================
 
-    "database/migration_v5_p4_2.sql"
+    "database/migration_v5_p4_2.sql",
+
+    # ======================================
+    # V6 P6.1
+    # Target Crawler URL
+    # ======================================
+
+    "database/migration_v6_p6_1.sql"
 
 ]
 

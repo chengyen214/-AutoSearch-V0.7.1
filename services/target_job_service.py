@@ -34,25 +34,31 @@ Pipeline:
         active Target
               |
               ▼
-          建立新的 WAITING Job
+        建立新的 WAITING Job
 
 
-    但：
+    Job 建立規則：
 
-        WAITING / RUNNING
+        只要 Target = active
+        就建立新的 WAITING Job。
 
-    不重複建立。
+        不判斷：
 
+            WAITING
+            RUNNING
+            DONE
+            FAILED
 
-    DONE:
+        也就是：
 
-        允許下一輪巡檢重新建立。
+            同一個 Target
+                ↓
+            可以存在多個 Job。
 
 
 負責:
 
     - 查詢 active targets
-    - 判斷是否已有執行中 Job
     - 建立 WAITING Job
 
 
@@ -76,7 +82,6 @@ Pipeline:
 from models.job import Job
 
 
-
 class TargetJobService:
     """
     Target → Job Service
@@ -89,6 +94,13 @@ class TargetJobService:
           ↓
         BatchExecutionService
 
+    Job Creation Policy：
+
+        active Target
+            ↓
+        每次建立新的 WAITING Job
+
+    不檢查既有 Job。
     """
 
     def __init__(
@@ -107,7 +119,9 @@ class TargetJobService:
 
 
     # ==================================================
+    #
     # Create Jobs
+    #
     # ==================================================
 
     def create_pending_jobs(self):
@@ -115,18 +129,23 @@ class TargetJobService:
         將所有 active Target
         建立 WAITING Job。
 
-        自動巡檢模式：
+        Job 建立規則：
 
-            DONE Job
+            只要 Target 是 active
+            就建立新的 Job。
 
-        不會阻擋下一次建立。
-
-        只有：
+        不判斷 Target 是否已有：
 
             WAITING
             RUNNING
+            DONE
+            FAILED
 
-        會阻擋。
+        因此：
+
+            同一個 Target
+                ↓
+            可以建立多個 Job。
         """
 
         targets = (
@@ -140,12 +159,13 @@ class TargetJobService:
 
         for target in targets:
 
-
-            if self.has_active_job(
-                target.id
-            ):
-                continue
-
+            # ------------------------------------------
+            #
+            # 直接建立新的 WAITING Job
+            #
+            # 不檢查既有 Job
+            #
+            # ------------------------------------------
 
             job = Job(
                 target_id=target.id
@@ -166,9 +186,10 @@ class TargetJobService:
         return created_jobs
 
 
-
     # ==================================================
+    #
     # Create Single Job
+    #
     # ==================================================
 
     def create_job(
@@ -177,6 +198,8 @@ class TargetJobService:
     ):
         """
         建立單一 Target Job。
+
+        不判斷 Target 是否已有其他 Job。
         """
 
         if target_id is None:
@@ -210,9 +233,10 @@ class TargetJobService:
         )
 
 
-
     # ==================================================
+    #
     # Check Active Job
+    #
     # ==================================================
 
     def has_active_job(
@@ -220,26 +244,20 @@ class TargetJobService:
         target_id,
     ):
         """
-        判斷 Target 是否已有執行中 Job。
+        查詢 Target 是否存在 WAITING / RUNNING Job。
 
+        注意：
 
-        阻擋：
+            此方法保留作為相容 API。
 
-            WAITING
-            RUNNING
+            create_pending_jobs()
+            已經不再使用此判斷。
 
+        因此：
 
-        不阻擋：
-
-            DONE
-            FAILED
-
-
-        自動巡檢模式：
-
-            DONE 可以重新建立新的 Job。
+            即使存在 WAITING / RUNNING Job，
+            create_pending_jobs() 仍然會建立新的 Job。
         """
-
 
         jobs = (
             self.job_repository
@@ -250,7 +268,6 @@ class TargetJobService:
 
 
         for job in jobs:
-
 
             if job.status in [
 
@@ -263,13 +280,13 @@ class TargetJobService:
                 return True
 
 
-
         return False
 
 
-
     # ==================================================
+    #
     # Check Waiting
+    #
     # ==================================================
 
     def has_waiting_job(
@@ -280,6 +297,11 @@ class TargetJobService:
         保留相容 API。
 
         判斷是否存在 WAITING Job。
+
+        注意：
+
+            此方法不會影響
+            create_pending_jobs() 的 Job 建立。
         """
 
         jobs = (
@@ -293,14 +315,15 @@ class TargetJobService:
         return len(jobs) > 0
 
 
-
     # ==================================================
+    #
     # Refresh
+    #
     # ==================================================
 
     def refresh_jobs(self):
         """
-        Alias:
+        Alias：
 
             create_pending_jobs()
         """
@@ -310,6 +333,11 @@ class TargetJobService:
         )
 
 
+# ==================================================
+#
+# Public API
+#
+# ==================================================
 
 __all__ = [
     "TargetJobService",

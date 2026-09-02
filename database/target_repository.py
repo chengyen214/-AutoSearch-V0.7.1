@@ -596,6 +596,116 @@ class TargetRepository:
             result
         )
 
+
+    # ==================================
+    # Query Crawler URL By URL + Keyword
+    # ==================================
+
+    def get_crawler_url_by_url_keyword(
+        self,
+        url,
+        keyword
+    ):
+        """
+        依 URL + Keyword
+        取得 Target 對應的 crawler_url。
+
+        用途：
+
+            URL + Keyword Target
+                ↓
+            targets
+                ↓
+            crawler_url
+                ↓
+            TargetSourceService
+                ↓
+            Source Definition
+
+        注意：
+
+            本方法只負責 Database Query。
+
+            不負責：
+
+                Search Provider
+                SearchAdapter
+                Search
+                Crawler
+        """
+
+        if not url:
+            return None
+
+        if not keyword:
+            return None
+
+        url = str(
+            url
+        ).strip()
+
+        keyword = str(
+            keyword
+        ).strip()
+
+        if not url:
+            return None
+
+        if not keyword:
+            return None
+
+        conn = get_connection()
+
+        cursor = conn.cursor(
+            dictionary=True
+        )
+
+        try:
+
+            cursor.execute(
+                """
+                SELECT crawler_url
+                FROM targets
+                WHERE target_type=%s
+                AND url=%s
+                AND keyword=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    "url",
+                    url,
+                    keyword,
+                )
+            )
+
+            result = cursor.fetchone()
+
+        finally:
+
+            cursor.close()
+            conn.close()
+
+        if result is None:
+            return None
+
+        crawler_url = result.get(
+            "crawler_url"
+        )
+
+        if crawler_url is None:
+            return None
+
+        crawler_url = str(
+            crawler_url
+        ).strip()
+
+        if not crawler_url:
+            return None
+
+        return crawler_url
+
+
     # ==================================
     # Exists By Search
     # ==================================
