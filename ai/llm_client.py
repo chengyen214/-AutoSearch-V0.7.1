@@ -1,7 +1,7 @@
 """
 llm_client.py
 
-AutoSearch V3
+AutoSearch V5
 
 LLM Provider 管理
 
@@ -9,6 +9,7 @@ LLM Provider 管理
 
     - mock
     - groq
+    - gemini
 
 未來：
 
@@ -21,6 +22,7 @@ import time
 from typing import Union
 
 from groq import Groq
+from google import genai
 
 from config.ai_config import (
 
@@ -28,7 +30,11 @@ from config.ai_config import (
 
     LLM_MODEL,
 
-    GROQ_API_KEY
+    GROQ_API_KEY,
+
+    GEMINI_API_KEY,
+
+    GEMINI_MODEL
 
 )
 
@@ -78,6 +84,26 @@ class LLMClient:
                 "Groq Client initialized."
             )
 
+        # =========================
+        # Gemini Client
+        # =========================
+
+        elif self.provider == "gemini":
+
+            if not GEMINI_API_KEY:
+
+                raise ValueError(
+                    "GEMINI_API_KEY is missing."
+                )
+
+            self.client = genai.Client(
+                api_key=GEMINI_API_KEY
+            )
+
+            logger.info(
+                "Gemini Client initialized."
+            )
+
     # ===================================================
     # Analyze
     # ===================================================
@@ -97,6 +123,12 @@ class LLMClient:
         elif self.provider == "groq":
 
             return self._groq(
+                prompt
+            )
+
+        elif self.provider == "gemini":
+
+            return self._gemini(
                 prompt
             )
 
@@ -260,6 +292,91 @@ class LLMClient:
 
                     logger.exception(
                         "Groq API failed after maximum retries."
+                    )
+
+                    raise
+
+    # ===================================================
+    # Gemini Provider
+    # ===================================================
+
+    def _gemini(
+        self,
+        prompt: str
+    ) -> str:
+        """
+        Gemini API 呼叫
+        """
+
+        MAX_RETRY = 2
+
+        model = GEMINI_MODEL
+
+        logger.info(
+            "===== GEMINI REQUEST ====="
+        )
+
+        logger.info(
+            f"Provider : {self.provider}"
+        )
+
+        logger.info(
+            f"Model    : {model}"
+        )
+
+        for attempt in range(
+            1,
+            MAX_RETRY + 1
+        ):
+
+            start = time.perf_counter()
+
+            try:
+
+                logger.info(
+                    f"Sending request... ({attempt}/{MAX_RETRY})"
+                )
+
+                response = self.client.models.generate_content(
+
+                    model=model,
+
+                    contents=prompt
+
+                )
+
+                elapsed = time.perf_counter() - start
+
+                logger.info(
+                    "===== GEMINI RESPONSE OK ====="
+                )
+
+                logger.info(
+                    f"Elapsed : {elapsed:.2f} sec"
+                )
+
+                return response.text
+
+            except Exception as e:
+
+                elapsed = time.perf_counter() - start
+
+                logger.warning(
+
+                    f"Attempt {attempt} failed "
+
+                    f"({elapsed:.2f} sec)"
+
+                )
+
+                logger.warning(
+                    str(e)
+                )
+
+                if attempt == MAX_RETRY:
+
+                    logger.exception(
+                        "Gemini API failed after maximum retries."
                     )
 
                     raise

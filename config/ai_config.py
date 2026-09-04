@@ -58,6 +58,10 @@ LLM_MODEL = os.getenv(
     ""
 )
 
+GEMINI_MODEL = os.getenv(
+    "GEMINI_MODEL",
+    ""
+)
 
 # ==================================================
 # Groq API Key
@@ -68,4 +72,11 @@ GROQ_API_KEY = os.getenv(
     ""
 )
 
+# ==================================================
+# Gemini API Key
+# ==================================================
 
+GEMINI_API_KEY = os.getenv(
+    "GEMINI_API_KEY",
+    ""
+)

@@ -20,7 +20,11 @@ Google News Search Provider
         ↓
     V4 Google News Search Engine
         ↓
-    SearchResult[]
+    60 Candidate SearchResult[]
+        ↓
+    Target crawler_url Exclusion
+        ↓
+    20 Valid SearchResult[]
         ↓
     ProviderSearchAdapter
         ↓
@@ -44,7 +48,6 @@ Google News Search Provider
         - Google News URL Decode
         - URL Deduplication
         - SearchResult 建立
-        - Result Limit
 
 本模組只負責：
 
@@ -52,7 +55,9 @@ Google News Search Provider
     - Provider Identity
     - Keyword Validation
     - Result Limit
+    - 取得全部 Target crawler_url
     - 呼叫 V4 Google News Search
+    - Target Source Exclusion
     - SearchResult Validation
     - SearchResult Normalization
 
@@ -62,13 +67,12 @@ Google News Search Provider
     - SearchAdapter
     - SearchAdapterManager
     - SearchExecutionBridge
-    - URL Deduplication
     - Crawler
     - Parser
     - Article
     - Archive
     - AI
-    - Database
+    - Target INSERT / UPDATE
 """
 
 
@@ -105,6 +109,17 @@ from models.search_result import (
 )
 
 
+# ==================================================
+#
+# URL Source Grouping Service
+#
+# ==================================================
+
+from services.url_source_grouping_service import (
+    URLSourceGroupingService,
+)
+
+
 class GoogleNewsProvider(SearchProvider):
     """
     V5 Google News Search Provider。
@@ -125,13 +140,19 @@ class GoogleNewsProvider(SearchProvider):
         - 不處理 Archive
         - 不處理 AI
 
-    Provider 只負責：
+    Provider 負責：
 
         keyword
             ↓
+        取得全部 Target crawler_url
+            ↓
         V4 Google News Search
             ↓
-        SearchResult[]
+        60 Candidate Results
+            ↓
+        排除所有 Target Source
+            ↓
+        20 Valid Results
     """
 
     # ==================================================
@@ -149,6 +170,14 @@ class GoogleNewsProvider(SearchProvider):
     # ==================================================
 
     max_results = 20
+
+    # ==================================================
+    #
+    # Candidate Result Limit
+    #
+    # ==================================================
+
+    candidate_results = 60
 
     # ==================================================
     #
@@ -185,6 +214,14 @@ class GoogleNewsProvider(SearchProvider):
 
         self.timeout = timeout
 
+        # --------------------------------------------------
+        # URL Source Grouping Service
+        # --------------------------------------------------
+
+        self.url_source_grouping_service = (
+            URLSourceGroupingService()
+        )
+
     # ==================================================
     #
     # Search
@@ -203,13 +240,19 @@ class GoogleNewsProvider(SearchProvider):
 
             keyword
                 ↓
+            targets
+                ↓
+            取得全部 crawler_url
+                ↓
             V4 search_engine.search()
                 ↓
-            SearchResult[]
+            60 Candidate Results
+                ↓
+            排除所有 Target Source
                 ↓
             Validate / Normalize
                 ↓
-            SearchResult[]
+            最多 20 Valid Results
 
         Parameters
         ----------
@@ -217,10 +260,16 @@ class GoogleNewsProvider(SearchProvider):
             Search Keyword。
 
         max_results :
-            最大搜尋結果數量。
+            最大回傳結果數量。
 
             None：
                 使用 Provider max_results。
+
+            注意：
+
+                V4 Google News Search
+                固定先取得 candidate_results
+                筆候選結果。
 
         Returns
         -------
@@ -259,27 +308,46 @@ class GoogleNewsProvider(SearchProvider):
 
         # ==================================================
         #
+        # Fetch ALL Target crawler_urls
+        #
+        # 不限制 keyword。
+        #
+        # Google News 永遠排除
+        # targets 裡所有 crawler_url。
+        #
+        # ==================================================
+
+        crawler_urls = (
+            self.url_source_grouping_service
+            .fetch_crawler_urls()
+        )
+
+        # ==================================================
+        #
         # V4 Google News Search
+        #
+        # 先取得 60 筆候選結果。
         #
         # ==================================================
 
         source_results = (
             google_news_search(
                 keyword,
-                max_results=max_results,
+                max_results=self.candidate_results,
             )
         )
 
         # ==================================================
         #
-        # Normalize Results
+        # Normalize / Filter Results
         #
         # ==================================================
 
         return self._normalize_results(
-            source_results,
-            keyword,
-            max_results,
+            source_results=source_results,
+            keyword=keyword,
+            max_results=max_results,
+            crawler_urls=crawler_urls,
         )
 
     # ==================================================
@@ -336,6 +404,10 @@ class GoogleNewsProvider(SearchProvider):
 
             保留為 <= 0，
             由 search() 判斷為空結果。
+
+        最大回傳數：
+
+            20
         """
 
         if max_results is None:
@@ -355,7 +427,10 @@ class GoogleNewsProvider(SearchProvider):
 
             return cls.max_results
 
-        return value
+        return min(
+            value,
+            cls.max_results,
+        )
 
     # ==================================================
     #
@@ -369,28 +444,40 @@ class GoogleNewsProvider(SearchProvider):
         source_results,
         keyword,
         max_results,
+        crawler_urls=None,
     ):
         """
         Validate / Normalize V4 Search Results。
 
-        本方法不重新建立 SearchResult。
-
-        只處理：
+        本方法處理：
 
             - None
             - list validation
             - SearchResult validation
             - URL validation
+            - 所有 Target crawler_url exclusion
             - keyword normalization
             - search_source normalization
             - rank normalization
             - result limit
 
+        流程：
+
+            60 Candidate Results
+                    ↓
+            ALL Target crawler_url exclusion
+                    ↓
+            Valid Results
+                    ↓
+            最多 20 筆
+
         URL Deduplication：
 
-            由 V4 search_engine.py 負責。
+            V4 search_engine.py
+            已經負責 URL Deduplication。
 
-        本 Provider 不重複執行 URL Deduplication。
+            Provider 不重新實作
+            V4 Search Engine 的 Deduplication。
         """
 
         if source_results is None:
@@ -406,6 +493,10 @@ class GoogleNewsProvider(SearchProvider):
                 "Google News Search "
                 "must return a list"
             )
+
+        if crawler_urls is None:
+
+            crawler_urls = []
 
         results = []
 
@@ -441,6 +532,43 @@ class GoogleNewsProvider(SearchProvider):
             ).strip()
 
             if not url:
+
+                continue
+
+            # ------------------------------------------
+            # Target crawler_url Exclusion
+            #
+            # 只要符合任何一個 Target crawler_url
+            # 就排除。
+            #
+            # 注意：
+            #
+            # crawler_urls 來自：
+            #
+            #     targets
+            #
+            # 的全部 crawler_url。
+            #
+            # 不限制 keyword。
+            #
+            # ------------------------------------------
+
+            excluded = False
+
+            for crawler_url in crawler_urls:
+
+                if (
+                    URLSourceGroupingService
+                    .is_excluded_by_crawler_url(
+                        url,
+                        crawler_url,
+                    )
+                ):
+
+                    excluded = True
+                    break
+
+            if excluded:
 
                 continue
 
@@ -496,12 +624,19 @@ class GoogleNewsProvider(SearchProvider):
 
                 pass
 
+            # ------------------------------------------
+            # Append Valid Result
+            # ------------------------------------------
+
             results.append(
                 item
             )
 
             # ------------------------------------------
             # Result Limit
+            #
+            # 最多回傳 20 筆。
+            #
             # ------------------------------------------
 
             if len(results) >= max_results:

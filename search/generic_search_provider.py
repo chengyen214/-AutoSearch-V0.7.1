@@ -208,7 +208,7 @@ class GenericSearchProvider(
     #
     # ==================================================
 
-    max_results = 20
+    max_results = 10
 
 
     # ==================================================
@@ -684,7 +684,10 @@ class GenericSearchProvider(
             return self.max_results
 
 
-        return value
+        return min(
+            value,
+            self.max_results,
+        )
 
 
     # ==================================================
