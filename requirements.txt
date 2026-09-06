@@ -71,3 +71,6 @@ pytest
 
 
 pymongo
+
+
+mcp[cli]

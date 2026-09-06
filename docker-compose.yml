@@ -194,6 +194,61 @@ services:
       ]
 
 
+  # ==================================================
+  # AutoSearch MCP
+  #
+  # MCP-1 ~ MCP-4
+  #
+  # Entry Point:
+  #
+  # python autosearch_mcp/server.py
+  #
+  # Transport:
+  #
+  # STDIO
+  #
+  # ==================================================
+
+  mcp:
+
+    build:
+
+      context: .
+
+      dockerfile: Dockerfile
+
+    container_name: autosearch-mcp
+
+    restart: unless-stopped
+
+    stdin_open: true
+
+    tty: false
+
+    env_file:
+
+      - .env
+
+    environment:
+
+      DB_HOST: mysql
+
+      DB_PORT: 3306
+
+    depends_on:
+
+      mysql:
+
+        condition: service_healthy
+
+    command:
+      [
+        "python",
+        "autosearch_mcp/server.py"
+      ]
+
+
+
 # ==================================================
 # Persistent Volumes
 # ==================================================
