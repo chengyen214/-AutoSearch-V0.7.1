@@ -107,6 +107,20 @@ services:
 
       - "8000:8000"
 
+    volumes:
+
+      # ----------------------------------------------
+      # ChromaDB Persistent Storage
+      #
+      # Host:
+      #   ./chroma_db
+      #
+      # Container:
+      #   /app/chroma_db
+      # ----------------------------------------------
+
+      - ./chroma_db:/app/chroma_db
+
     depends_on:
 
       mysql:
@@ -175,6 +189,14 @@ services:
       MONGO_DATABASE: autosearch
 
       MONGO_RAW_HTML_COLLECTION: raw_html
+
+    volumes:
+
+      # ----------------------------------------------
+      # ChromaDB Persistent Storage
+      # ----------------------------------------------
+
+      - ./chroma_db:/app/chroma_db
 
     depends_on:
 
