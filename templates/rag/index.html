@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+
+<html lang="zh-TW">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>RAG 問答 - AutoSearch</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family:
+                Arial,
+                "Microsoft JhengHei",
+                sans-serif;
+            background: #f5f7fa;
+            color: #1f2937;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        .header {
+            margin-bottom: 30px;
+        }
+
+        .back {
+            display: inline-block;
+            margin-bottom: 18px;
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .back:hover {
+            text-decoration: underline;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 32px;
+        }
+
+        .description {
+            margin: 0;
+            color: #6b7280;
+            font-size: 16px;
+        }
+
+        .query-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow:
+                0 2px 8px rgba(0, 0, 0, 0.08);
+            margin-bottom: 24px;
+        }
+
+        .query-label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            resize: vertical;
+            padding: 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 16px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        textarea:focus {
+            border-color: #2563eb;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 14px;
+        }
+
+        button {
+            padding: 10px 22px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .status {
+            display: none;
+            margin-top: 15px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .result {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow:
+                0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .section-title {
+            margin: 0 0 16px 0;
+            font-size: 20px;
+        }
+
+        .answer {
+            line-height: 1.8;
+            font-size: 16px;
+            margin-bottom: 30px;
+            word-break: break-word;
+        }
+
+        .answer strong {
+            font-weight: 700;
+        }
+
+        .sources {
+            border-top: 1px solid #e5e7eb;
+            padding-top: 20px;
+        }
+
+        .source {
+            padding: 14px;
+            margin-bottom: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+
+        .source-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }
+
+        .source-url {
+            color: #2563eb;
+            word-break: break-all;
+            font-size: 14px;
+        }
+
+        .source-url a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .source-url a:hover {
+            text-decoration: underline;
+        }
+
+        .no-sources {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .error {
+            display: none;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        @media (max-width: 768px) {
+
+            .container {
+                padding: 24px 16px;
+            }
+
+            h1 {
+                font-size: 26px;
+            }
+
+            .query-card,
+            .result {
+                padding: 18px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+<div class="container">
+
+    <!-- =====================================================
+         Header
+         ===================================================== -->
+
+    <div class="header">
+
+        <a
+            href="/"
+            class="back"
+        >
+            ← 返回首頁
+        </a>
+
+        <h1>
+            🤖 RAG 問答
+        </h1>
+
+        <p class="description">
+            使用 AutoSearch Knowledge Base
+            進行 RAG 問答，並顯示相關來源。
+        </p>
+
+    </div>
+
+
+    <!-- =====================================================
+         Query
+         ===================================================== -->
+
+    <div class="query-card">
+
+        <label
+            for="query"
+            class="query-label"
+        >
+            請輸入問題
+        </label>
+
+        <textarea
+            id="query"
+            placeholder="例如：台積電近期在 AI 半導體方面有哪些發展？"
+        ></textarea>
+
+        <div class="actions">
+
+            <button
+                id="submitButton"
+                onclick="submitQuery()"
+            >
+                送出問題
+            </button>
+
+        </div>
+
+        <div
+            id="status"
+            class="status"
+        >
+            正在進行 RAG 搜尋與生成回答，請稍候……
+        </div>
+
+        <div
+            id="error"
+            class="error"
+        ></div>
+
+    </div>
+
+
+    <!-- =====================================================
+         Result
+         ===================================================== -->
+
+    <div
+        id="result"
+        class="result"
+    >
+
+        <h2 class="section-title">
+            AI 回答
+        </h2>
+
+        <div
+            id="answer"
+            class="answer"
+        ></div>
+
+
+        <div class="sources">
+
+            <h2 class="section-title">
+                相關來源
+            </h2>
+
+            <div
+                id="sources"
+            ></div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+/**
+ * ==========================================================
+ * Basic Markdown Renderer
+ * ==========================================================
+ *
+ * 支援：
+ *
+ * - **粗體**
+ * - [Source N]
+ * - 換行
+ *
+ * 不使用外部 Markdown library。
+ */
+
+function renderMarkdown(text) {
+
+    if (!text) {
+        return "";
+    }
+
+    let html =
+        String(text);
+
+    // ------------------------------------------------------
+    // Escape HTML
+    // ------------------------------------------------------
+
+    html =
+        html
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+
+
+    // ------------------------------------------------------
+    // Bold
+    // ------------------------------------------------------
+
+    html =
+        html.replace(
+            /\*\*(.*?)\*\*/g,
+            "<strong>$1</strong>"
+        );
+
+
+    // ------------------------------------------------------
+    // Source references
+    // ------------------------------------------------------
+
+    html =
+        html.replace(
+            /\[Source\s*([0-9]+)\]/g,
+            "<strong>[Source $1]</strong>"
+        );
+
+
+    // ------------------------------------------------------
+    // Line breaks
+    // ------------------------------------------------------
+
+    html =
+        html.replace(
+            /\r?\n/g,
+            "<br>"
+        );
+
+    return html;
+}
+
+
+/**
+ * ==========================================================
+ * Normalize Sources
+ * ==========================================================
+ *
+ * 支援目前 API 格式：
+ *
+ * {
+ *     "sources": [...]
+ * }
+ *
+ * 也相容：
+ *
+ * {
+ *     "source_references": [...]
+ * }
+ *
+ * 以及 JSON string：
+ *
+ * {
+ *     "sources": "[...]"
+ * }
+ */
+
+function normalizeSources(data) {
+
+    let sourceList = [];
+
+
+    // ------------------------------------------------------
+    // sources: Array
+    // ------------------------------------------------------
+
+    if (Array.isArray(data.sources)) {
+
+        sourceList =
+            data.sources;
+
+    }
+
+
+    // ------------------------------------------------------
+    // source_references: Array
+    // ------------------------------------------------------
+
+    else if (
+        Array.isArray(
+            data.source_references
+        )
+    ) {
+
+        sourceList =
+            data.source_references;
+
+    }
+
+
+    // ------------------------------------------------------
+    // sources: JSON string
+    // ------------------------------------------------------
+
+    else if (
+        typeof data.sources === "string"
+    ) {
+
+        try {
+
+            const parsed =
+                JSON.parse(
+                    data.sources
+                );
+
+            if (Array.isArray(parsed)) {
+
+                sourceList =
+                    parsed;
+
+            }
+
+        }
+        catch (error) {
+
+            console.warn(
+                "Unable to parse data.sources:",
+                error
+            );
+
+        }
+
+    }
+
+
+    // ------------------------------------------------------
+    // source_references: JSON string
+    // ------------------------------------------------------
+
+    else if (
+        typeof data.source_references === "string"
+    ) {
+
+        try {
+
+            const parsed =
+                JSON.parse(
+                    data.source_references
+                );
+
+            if (Array.isArray(parsed)) {
+
+                sourceList =
+                    parsed;
+
+            }
+
+        }
+        catch (error) {
+
+            console.warn(
+                "Unable to parse data.source_references:",
+                error
+            );
+
+        }
+
+    }
+
+    return sourceList;
+}
+
+
+/**
+ * ==========================================================
+ * Submit RAG Query
+ * ==========================================================
+ */
+
+async function submitQuery() {
+
+    const queryElement =
+        document.getElementById("query");
+
+    const button =
+        document.getElementById("submitButton");
+
+    const status =
+        document.getElementById("status");
+
+    const error =
+        document.getElementById("error");
+
+    const result =
+        document.getElementById("result");
+
+    const answer =
+        document.getElementById("answer");
+
+    const sources =
+        document.getElementById("sources");
+
+
+    const query =
+        queryElement.value.trim();
+
+
+    // ======================================================
+    // Validate
+    // ======================================================
+
+    if (!query) {
+
+        error.textContent =
+            "請先輸入問題。";
+
+        error.style.display =
+            "block";
+
+        return;
+    }
+
+
+    // ======================================================
+    // Reset
+    // ======================================================
+
+    error.style.display =
+        "none";
+
+    result.style.display =
+        "none";
+
+    status.style.display =
+        "block";
+
+    button.disabled =
+        true;
+
+
+    try {
+
+        // ==================================================
+        // Call FastAPI
+        // ==================================================
+
+        const response =
+            await fetch(
+                "/rag/query",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        query: query
+                    })
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        // ==================================================
+        // Debug
+        // ==================================================
+
+        console.log(
+            "RAG API response:",
+            data
+        );
+
+
+        // ==================================================
+        // HTTP Error
+        // ==================================================
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.detail ||
+                data.error ||
+                "RAG query failed."
+            );
+
+        }
+
+
+        // ==================================================
+        // API Error
+        // ==================================================
+
+        if (data.error) {
+
+            throw new Error(
+                data.error
+            );
+
+        }
+
+
+        // ==================================================
+        // Answer
+        // ==================================================
+
+        answer.innerHTML =
+            renderMarkdown(
+                data.answer || ""
+            );
+
+
+        // ==================================================
+        // Sources
+        // ==================================================
+
+        sources.innerHTML =
+            "";
+
+
+        const sourceList =
+            normalizeSources(
+                data
+            );
+
+
+        console.log(
+            "RAG sources:",
+            sourceList
+        );
+
+
+        if (sourceList.length > 0) {
+
+            sourceList.forEach(
+                function(source) {
+
+                    const sourceElement =
+                        document.createElement(
+                            "div"
+                        );
+
+                    sourceElement.className =
+                        "source";
+
+
+                    // ======================================
+                    // Source Index
+                    // ======================================
+
+                    const sourceIndex =
+                        source.source_index ??
+                        source.sourceIndex ??
+                        "";
+
+
+                    // ======================================
+                    // Source Title
+                    // ======================================
+
+                    const title =
+                        document.createElement(
+                            "div"
+                        );
+
+                    title.className =
+                        "source-title";
+
+                    title.textContent =
+                        `[Source ${sourceIndex}] ${
+                            source.title ||
+                            "Untitled"
+                        }`;
+
+
+                    // ======================================
+                    // Source URL
+                    // ======================================
+
+                    const url =
+                        document.createElement(
+                            "div"
+                        );
+
+                    url.className =
+                        "source-url";
+
+
+                    if (source.url) {
+
+                        const link =
+                            document.createElement(
+                                "a"
+                            );
+
+
+                        // ==================================
+                        // IMPORTANT
+                        //
+                        // 不再前往原始外部網站。
+                        //
+                        // 改為開啟 AutoSearch
+                        // Archive Viewer。
+                        // ==================================
+
+                        link.href =
+                            `/archive/view?url=${encodeURIComponent(
+                                source.url
+                            )}`;
+
+
+                        link.target =
+                            "_blank";
+
+
+                        link.rel =
+                            "noopener noreferrer";
+
+
+                        // 顯示原始 URL，
+                        // 但實際點擊目的地是 Archive Viewer。
+
+                        link.textContent =
+                            source.url;
+
+
+                        url.appendChild(
+                            link
+                        );
+
+                    }
+
+
+                    // ======================================
+                    // Append
+                    // ======================================
+
+                    sourceElement.appendChild(
+                        title
+                    );
+
+                    sourceElement.appendChild(
+                        url
+                    );
+
+                    sources.appendChild(
+                        sourceElement
+                    );
+
+                }
+            );
+
+        }
+
+        else {
+
+            const emptyMessage =
+                document.createElement(
+                    "div"
+                );
+
+            emptyMessage.className =
+                "no-sources";
+
+            emptyMessage.textContent =
+                "沒有找到來源。";
+
+            sources.appendChild(
+                emptyMessage
+            );
+
+        }
+
+
+        // ==================================================
+        // Show Result
+        // ==================================================
+
+        result.style.display =
+            "block";
+
+    }
+
+
+    catch (errorObject) {
+
+        console.error(
+            "RAG query error:",
+            errorObject
+        );
+
+        error.textContent =
+            errorObject.message ||
+            "RAG query failed.";
+
+        error.style.display =
+            "block";
+
+    }
+
+
+    finally {
+
+        status.style.display =
+            "none";
+
+        button.disabled =
+            false;
+
+    }
+
+}
+
+</script>
+
+</body>
+
+</html>

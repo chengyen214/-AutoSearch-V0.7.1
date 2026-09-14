@@ -1,7 +1,7 @@
 """
 llm_client.py
 
-AutoSearch V5
+AutoSearch V7
 
 LLM Provider 管理
 
@@ -14,6 +14,10 @@ LLM Provider 管理
 未來：
 
     - ollama
+
+RAG-7.1
+
+LLM Configuration
 """
 
 
@@ -29,6 +33,12 @@ from config.ai_config import (
     LLM_PROVIDER,
 
     LLM_MODEL,
+
+    LLM_TEMPERATURE,
+
+    LLM_MAX_TOKENS,
+
+    LLM_TIMEOUT,
 
     GROQ_API_KEY,
 
@@ -62,6 +72,22 @@ class LLMClient:
 
         logger.info(
             f"LLM Provider: {self.provider}"
+        )
+
+        logger.info(
+            f"LLM Model: {LLM_MODEL}"
+        )
+
+        logger.info(
+            f"LLM Temperature: {LLM_TEMPERATURE}"
+        )
+
+        logger.info(
+            f"LLM Max Tokens: {LLM_MAX_TOKENS}"
+        )
+
+        logger.info(
+            f"LLM Timeout: {LLM_TIMEOUT}"
         )
 
         # =========================
@@ -201,6 +227,18 @@ class LLMClient:
             f"Model    : {LLM_MODEL}"
         )
 
+        logger.info(
+            f"Temperature : {LLM_TEMPERATURE}"
+        )
+
+        logger.info(
+            f"Max Tokens  : {LLM_MAX_TOKENS}"
+        )
+
+        logger.info(
+            f"Timeout     : {LLM_TIMEOUT}"
+        )
+
         for attempt in range(
             1,
             MAX_RETRY + 1
@@ -246,7 +284,11 @@ class LLMClient:
 
                     ],
 
-                    temperature=0.2
+                    temperature=LLM_TEMPERATURE,
+
+                    max_tokens=LLM_MAX_TOKENS,
+
+                    timeout=LLM_TIMEOUT
 
                 )
 

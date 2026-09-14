@@ -17,10 +17,10 @@ Embedding Model
         sentence-transformers
 
     Model:
-        Qwen/Qwen3-Embedding-0.6B
+        taide/embeddinggemma-GTAIDE-300m-2605
 
     Dimension:
-        1024
+        768
 
 資料流程：
 
@@ -30,7 +30,7 @@ Embedding Model
             ↓
     SentenceTransformer
             ↓
-    Qwen/Qwen3-Embedding-0.6B
+    taide/embeddinggemma-GTAIDE-300m-2605
 
 本階段負責：
 

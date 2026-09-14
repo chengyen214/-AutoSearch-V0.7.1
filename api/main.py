@@ -303,7 +303,8 @@ from api.routes import (
     ranking,
 
     system,
-
+    
+    rag,
 )
 
 
@@ -859,4 +860,13 @@ app.include_router(
 
 app.include_router(
     targets.router
+)
+
+# ==================================================
+# V7
+# RAG API
+# ==================================================
+
+app.include_router(
+    rag.router
 )

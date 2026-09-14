@@ -34,9 +34,9 @@ Embedding Validation
           ↓
     EmbeddingModel
           ↓
-    Qwen/Qwen3-Embedding-0.6B
+    taide/embeddinggemma-GTAIDE-300m-2605
           ↓
-    1024 維 Embedding Vectors
+    768 維 Embedding Vectors
           ↓
     Embedding Mapping
           ↓

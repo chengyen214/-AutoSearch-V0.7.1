@@ -16,8 +16,8 @@ Embedding Configuration
 
 目前設定：
     EMBEDDING_PROVIDER=sentence-transformers
-    EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
-    EMBEDDING_DIMENSION=1024
+    EMBEDDING_MODEL=taide/embeddinggemma-GTAIDE-300m-2605
+    EMBEDDING_DIMENSION=768
 """
 
 import os
@@ -44,14 +44,14 @@ EMBEDDING_PROVIDER = os.getenv(
 
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL",
-    "Qwen/Qwen3-Embedding-0.6B"
+    "taide/embeddinggemma-GTAIDE-300m-2605"
 ).strip()
 
 
 EMBEDDING_DIMENSION = int(
     os.getenv(
         "EMBEDDING_DIMENSION",
-        "1024"
+        "768"
     )
 )
 

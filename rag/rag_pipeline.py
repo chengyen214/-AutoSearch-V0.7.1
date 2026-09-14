@@ -61,7 +61,7 @@ RAG Pipeline
     4. Parser
     5. Chunking implementation
     6. Embedding implementation
-    7. Qwen Embedding Model implementation
+    7. Embedding Model implementation
     8. ChromaDB Client implementation
     9. ChromaDB Collection implementation
     10. ChromaDB Indexer implementation

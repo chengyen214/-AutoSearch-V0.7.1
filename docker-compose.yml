@@ -121,6 +121,18 @@ services:
 
       - ./chroma_db:/app/chroma_db
 
+      # ----------------------------------------------
+      # Hugging Face Model Cache
+      #
+      # Host:
+      #   %USERPROFILE%\.cache\huggingface
+      #
+      # Container:
+      #   /root/.cache/huggingface
+      # ----------------------------------------------
+      
+      - ${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface
+
     depends_on:
 
       mysql:
@@ -197,6 +209,7 @@ services:
       # ----------------------------------------------
 
       - ./chroma_db:/app/chroma_db
+      
 
     depends_on:
 

@@ -21,10 +21,10 @@ Embedding Configuration
         sentence-transformers
 
     Embedding Model：
-        Qwen/Qwen3-Embedding-0.6B
+        taide/embeddinggemma-GTAIDE-300m-2605
 
     Embedding Dimension：
-        1024
+        768
 
 設計原則：
 

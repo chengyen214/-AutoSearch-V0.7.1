@@ -1,31 +1,28 @@
 """
 config/ai_config.py
 
-AutoSearch V4
+AutoSearch V7
 
-P2.4.2
+RAG-7.1
 
-AI Configuration
+LLM Configuration
 
 功能:
 
-1. AI Provider 設定
-2. AI Model 設定
-3. Groq API 設定
-4. Async AI Task Batch Threshold
+1. AI / LLM Provider 設定
+2. LLM Model 設定
+3. LLM Temperature 設定
+4. LLM Max Tokens 設定
+5. LLM Timeout 設定
+6. Groq API 設定
+7. Gemini API 設定
 
-P2.4.2:
+注意:
 
-當資料庫 WAITING AI Task
-累積達到指定數量時，
-
-由 AI Scheduler
-觸發 Async AI Processing。
-
-預設:
-
-    50 Tasks
+本設定檔沿用 AutoSearch 既有 LLM Configuration，
+RAG-7 不建立第二套 LLM 設定系統。
 """
+
 
 import os
 
@@ -58,10 +55,52 @@ LLM_MODEL = os.getenv(
     ""
 )
 
+
+# ==================================================
+# LLM Temperature
+# ==================================================
+
+LLM_TEMPERATURE = float(
+    os.getenv(
+        "LLM_TEMPERATURE",
+        "0.2"
+    )
+)
+
+
+# ==================================================
+# LLM Max Tokens
+# ==================================================
+
+LLM_MAX_TOKENS = int(
+    os.getenv(
+        "LLM_MAX_TOKENS",
+        "4096"
+    )
+)
+
+
+# ==================================================
+# LLM Timeout
+# ==================================================
+
+LLM_TIMEOUT = int(
+    os.getenv(
+        "LLM_TIMEOUT",
+        "60"
+    )
+)
+
+
+# ==================================================
+# Gemini Model
+# ==================================================
+
 GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL",
     ""
 )
+
 
 # ==================================================
 # Groq API Key
@@ -71,6 +110,7 @@ GROQ_API_KEY = os.getenv(
     "GROQ_API_KEY",
     ""
 )
+
 
 # ==================================================
 # Gemini API Key

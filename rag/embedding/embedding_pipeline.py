@@ -31,9 +31,9 @@ RAG-3 Embedding Pipeline
           ↓
     EmbeddingModel
           ↓
-    Qwen/Qwen3-Embedding-0.6B
+    taide/embeddinggemma-GTAIDE-300m-2605
           ↓
-    1024 維 Embedding
+    768 維 Embedding
           ↓
     Chunk ↔ Embedding Mapping
           ↓
