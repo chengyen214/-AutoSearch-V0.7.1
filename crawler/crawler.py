@@ -59,28 +59,13 @@ Backward Compatibility：
         AI
 """
 
-
-# ==================================================
-#
-# Standard Library
-#
-# ==================================================
-
 import hashlib
-
 import time
 
 from urllib.parse import (
     urljoin,
     urlparse,
 )
-
-
-# ==================================================
-#
-# Third Party
-#
-# ==================================================
 
 import requests
 
@@ -94,27 +79,12 @@ from urllib3.exceptions import (
 
 import urllib3
 
-
-# ==================================================
-#
-# Project
-#
-# ==================================================
-
 from config.settings import (
     TIMEOUT,
     CRAWL_DELAY,
 )
 
-
-# ==================================================
-#
-# Default Headers
-#
-# ==================================================
-
 DEFAULT_HEADERS = {
-
     "User-Agent":
     (
         "Mozilla/5.0 "
@@ -123,81 +93,47 @@ DEFAULT_HEADERS = {
         "(KHTML, like Gecko) "
         "Chrome/120 Safari/537.36"
     ),
-
     "Accept-Language":
         "zh-TW,zh;q=0.9,en;q=0.8",
-
 }
-
-
-# ==================================================
-#
-# SSL Fallback Host Cache
-#
-# ==================================================
 
 _SSL_FALLBACK_HOSTS = set()
 
-
-# ==================================================
-#
-# SSL Host Helper
-#
-# ==================================================
 
 def _get_hostname(
     url,
 ):
     """
-    取得 URL Host。
-
-    例如：
-
-        https://www.nuk.edu.tw/
-            ↓
-        www.nuk.edu.tw
-
-    若 URL 無法解析，
-    回傳 None。
+    取得 URL Host，例如 https://www.nuk.edu.tw/ → www.nuk.edu.tw。
+    若 URL 無法解析，回傳 None。
     """
-
     if not url:
-
         return None
 
     try:
-
         hostname = urlparse(
             str(url)
         ).hostname
-
     except Exception:
-
         return None
 
     if not hostname:
-
         return None
 
     return hostname.lower()
 
 
-# ==================================================
-
 def _is_ssl_fallback_host(
     url,
 ):
     """
-    判斷 Host 是否已經進入
-    SSL fallback cache。
+    判斷 Host 是否已經進入 SSL fallback cache。
     """
-
     hostname = _get_hostname(
         url
     )
 
     if not hostname:
-
         return False
 
     return (
@@ -206,34 +142,20 @@ def _is_ssl_fallback_host(
     )
 
 
-# ==================================================
-
 def _mark_ssl_fallback_host(
     url,
 ):
     """
-    將 Host 加入 SSL fallback cache。
-
-    注意：
-
-        只記錄 Host。
-
-        不永久保存。
-
-        Python Process 結束後
-        Cache 即消失。
+    將 Host 加入 SSL fallback cache；只記錄 Host，不永久保存。
     """
-
     hostname = _get_hostname(
         url
     )
 
     if not hostname:
-
         return
 
     if hostname in _SSL_FALLBACK_HOSTS:
-
         return
 
     _SSL_FALLBACK_HOSTS.add(
@@ -246,49 +168,21 @@ def _mark_ssl_fallback_host(
     )
 
 
-# ==================================================
-
 def _clear_ssl_fallback_cache():
     """
-    清除 SSL fallback cache。
-
-    主要提供：
-
-        測試
-        Debug
-
-    使用者正常 Pipeline
-    不需要呼叫。
+    清除 SSL fallback cache，主要提供測試與 Debug 使用。
     """
-
     _SSL_FALLBACK_HOSTS.clear()
 
 
-# ==================================================
-#
-# SSL Warning
-#
-# ==================================================
-
 def _disable_ssl_warning():
     """
-    停用 urllib3 的
-    InsecureRequestWarning。
-
-    只在 SSL fallback
-    verify=False 時使用。
+    停用 urllib3 的 InsecureRequestWarning，只在 SSL fallback verify=False 時使用。
     """
-
     urllib3.disable_warnings(
         InsecureRequestWarning
     )
 
-
-# ==================================================
-#
-# Resolve Redirect URL
-#
-# ==================================================
 
 def resolve_url(
     url,
@@ -321,67 +215,40 @@ def resolve_url(
 
         最終 URL
     """
-
     if headers is None:
-
         headers = DEFAULT_HEADERS
-
-    # ==================================================
-    # Cached SSL Fallback
-    # ==================================================
 
     if _is_ssl_fallback_host(
         url
     ):
-
         try:
-
             _disable_ssl_warning()
 
             response = requests.get(
-
                 url,
-
                 headers=headers,
-
                 allow_redirects=True,
-
                 timeout=TIMEOUT,
-
                 verify=False,
-
             )
 
             return response.url
 
         except requests.RequestException:
-
             return url
 
-    # ==================================================
-    # Normal Redirect
-    # ==================================================
-
     try:
-
         response = requests.get(
-
             url,
-
             headers=headers,
-
             allow_redirects=True,
-
             timeout=TIMEOUT,
-
             verify=True,
-
         )
 
         return response.url
 
     except requests.exceptions.SSLError as e:
-
         print(
             "SSL 憑證驗證失敗，"
             "Resolve URL 啟用 SSL fallback:"
@@ -389,30 +256,19 @@ def resolve_url(
 
         print(e)
 
-        # ------------------------------------------
-        # Cache Host
-        # ------------------------------------------
-
         _mark_ssl_fallback_host(
             url
         )
 
         try:
-
             _disable_ssl_warning()
 
             response = requests.get(
-
                 url,
-
                 headers=headers,
-
                 allow_redirects=True,
-
                 timeout=TIMEOUT,
-
                 verify=False,
-
             )
 
             print(
@@ -422,7 +278,6 @@ def resolve_url(
             return response.url
 
         except requests.RequestException as fallback_error:
-
             print(
                 "SSL fallback redirect 失敗:"
             )
@@ -434,85 +289,43 @@ def resolve_url(
             return url
 
     except requests.RequestException:
-
         return url
 
-
-# ==================================================
-#
-# Encoding Fix
-#
-# ==================================================
 
 def fix_encoding(
     response,
 ):
     """
-    修正網站編碼。
-
-    避免：
-
-        UTF-8
-        ↓
-        ISO-8859-1
-        ↓
-        中文亂碼
+    修正網站編碼，避免 UTF-8 → ISO-8859-1 → 中文亂碼。
     """
-
     encoding = response.apparent_encoding
 
     if encoding:
-
         response.encoding = encoding
 
     return response.text
 
-
-# ==================================================
-#
-# Normal HTTPS Request
-#
-# ==================================================
 
 def _download_request(
     url,
     headers,
 ):
     """
-    HTTP Download。
-
-    行為：
-
-        若 Host 已進入 SSL fallback cache：
-
-            verify=False
-
-        否則：
-
-            verify=True
-
-    SSL 錯誤會交由上層
-    進行 fallback。
+    HTTP Download；Host 已進入 SSL fallback cache 時使用 verify=False，否則使用 verify=True。
+    SSL 錯誤會交由上層進行 fallback。
     """
-
     verify_ssl = not _is_ssl_fallback_host(
         url
     )
 
     if not verify_ssl:
-
         _disable_ssl_warning()
 
     response = requests.get(
-
         url,
-
         headers=headers,
-
         timeout=TIMEOUT,
-
         verify=verify_ssl,
-
     )
 
     response.raise_for_status()
@@ -520,30 +333,13 @@ def _download_request(
     return response
 
 
-# ==================================================
-#
-# SSL Fallback Request
-#
-# ==================================================
-
 def _download_ssl_fallback(
     url,
     headers,
 ):
     """
-    SSL Certificate Error fallback。
-
-    使用：
-
-        verify=False
-
-    同時將 Host 加入
-    SSL fallback cache。
-
-    後續同 Host Resource
-    不需要再次先嘗試 verify=True。
+    SSL Certificate Error fallback，使用 verify=False 並將 Host 加入 SSL fallback cache。
     """
-
     _mark_ssl_fallback_host(
         url
     )
@@ -559,15 +355,10 @@ def _download_ssl_fallback(
     _disable_ssl_warning()
 
     response = requests.get(
-
         url,
-
         headers=headers,
-
         timeout=TIMEOUT,
-
         verify=False,
-
     )
 
     response.raise_for_status()
@@ -575,30 +366,13 @@ def _download_ssl_fallback(
     return response
 
 
-# ==================================================
-#
-# Resource Hash
-#
-# ==================================================
-
 def generate_resource_hash(
     data,
 ):
     """
-    產生 Resource SHA-256。
-
-    支援：
-
-        bytes
-        str
-
-    Returns：
-
-        64 字元 hexadecimal SHA-256
+    產生 Resource SHA-256，支援 bytes 與 str，回傳 64 字元 hexadecimal SHA-256。
     """
-
     if data is None:
-
         raise ValueError(
             "data cannot be None"
         )
@@ -607,7 +381,6 @@ def generate_resource_hash(
         data,
         str,
     ):
-
         data = data.encode(
             "utf-8"
         )
@@ -616,7 +389,6 @@ def generate_resource_hash(
         data,
         bytes,
     ):
-
         data = bytes(
             data
         )
@@ -626,38 +398,14 @@ def generate_resource_hash(
     ).hexdigest()
 
 
-# ==================================================
-#
-# Normalize Resource URL
-#
-# ==================================================
-
 def normalize_resource_url(
     resource_url,
     base_url,
 ):
     """
-    將 HTML 中的 Resource URL
-    轉換成絕對 URL。
-
-    例如：
-
-        /css/main.css
-
-            ↓
-
-        https://example.com/css/main.css
-
-
-        ../images/a.jpg
-
-            ↓
-
-        https://example.com/images/a.jpg
+    將 HTML 中的 Resource URL 轉換成絕對 URL。
     """
-
     if not resource_url:
-
         return None
 
     resource_url = str(
@@ -665,12 +413,7 @@ def normalize_resource_url(
     ).strip()
 
     if not resource_url:
-
         return None
-
-    # ----------------------------------------------
-    # Ignore non HTTP resource
-    # ----------------------------------------------
 
     if resource_url.startswith(
         (
@@ -681,7 +424,6 @@ def normalize_resource_url(
             "#",
         )
     ):
-
         return None
 
     return urljoin(
@@ -690,31 +432,15 @@ def normalize_resource_url(
     )
 
 
-# ==================================================
-#
-# Extract CSS URLs
-#
-# ==================================================
-
 def extract_css_urls(
     html,
     base_url,
 ):
     """
-    從 HTML 擷取 CSS URL。
-
-    主要處理：
-
-        <link rel="stylesheet"
-              href="...">
-
-    Returns：
-
-        list[str]
+    從 HTML 擷取 CSS URL，主要處理 <link rel="stylesheet" href="...">。
+    Returns: list[str]
     """
-
     if not html:
-
         return []
 
     soup = BeautifulSoup(
@@ -723,17 +449,11 @@ def extract_css_urls(
     )
 
     css_urls = []
-
     seen = set()
-
-    # --------------------------------------------------
-    # LINK stylesheet
-    # --------------------------------------------------
 
     for tag in soup.find_all(
         "link"
     ):
-
         rel = tag.get(
             "rel"
         )
@@ -743,23 +463,19 @@ def extract_css_urls(
         )
 
         if not href:
-
             continue
 
         if isinstance(
             rel,
             list,
         ):
-
             rel_values = [
                 str(
                     value
                 ).lower()
                 for value in rel
             ]
-
         else:
-
             rel_values = [
                 str(
                     rel
@@ -767,7 +483,6 @@ def extract_css_urls(
             ]
 
         if "stylesheet" not in rel_values:
-
             continue
 
         css_url = normalize_resource_url(
@@ -776,11 +491,9 @@ def extract_css_urls(
         )
 
         if not css_url:
-
             continue
 
         if css_url in seen:
-
             continue
 
         seen.add(
@@ -794,34 +507,14 @@ def extract_css_urls(
     return css_urls
 
 
-# ==================================================
-#
-# Extract Image URLs
-#
-# ==================================================
-
 def extract_image_urls(
     html,
     base_url,
 ):
     """
-    從 HTML 擷取圖片 URL。
-
-    支援：
-
-        <img src="">
-        <img data-src="">
-        <img data-original="">
-        <img data-lazy-src="">
-        <img srcset="">
-
-    Returns：
-
-        list[str]
+    從 HTML 擷取圖片 URL，支援 img src、data-src、data-original、data-lazy-src、data-image 與 srcset。
     """
-
     if not html:
-
         return []
 
     soup = BeautifulSoup(
@@ -830,33 +523,20 @@ def extract_image_urls(
     )
 
     image_urls = []
-
     seen = set()
-
-    # --------------------------------------------------
-    # IMG
-    # --------------------------------------------------
 
     for tag in soup.find_all(
         "img"
     ):
-
         attributes = (
-
             "src",
-
             "data-src",
-
             "data-original",
-
             "data-lazy-src",
-
             "data-image",
-
         )
 
         for attribute in attributes:
-
             value = tag.get(
                 attribute
             )
@@ -867,11 +547,9 @@ def extract_image_urls(
             )
 
             if not image_url:
-
                 continue
 
             if image_url in seen:
-
                 continue
 
             seen.add(
@@ -882,24 +560,17 @@ def extract_image_urls(
                 image_url
             )
 
-        # --------------------------------------------------
-        # srcset
-        # --------------------------------------------------
-
         srcset = tag.get(
             "srcset"
         )
 
         if srcset:
-
             for item in srcset.split(
                 ","
             ):
-
                 item = item.strip()
 
                 if not item:
-
                     continue
 
                 image_url = item.split(
@@ -912,11 +583,9 @@ def extract_image_urls(
                 )
 
                 if not image_url:
-
                     continue
 
                 if image_url in seen:
-
                     continue
 
                 seen.add(
@@ -930,64 +599,33 @@ def extract_image_urls(
     return image_urls
 
 
-# ==================================================
-#
-# Download CSS Resource
-#
-# ==================================================
-
 def download_css_resource(
     url,
     headers=None,
 ):
     """
-    下載單一 CSS Resource。
-
-    Returns：
-
-        dict
-
-    格式：
-
-        {
-            "url": "...",
-            "content": "...",
-            "content_hash": "...",
-            "mime_type": "...",
-            "file_size": ...
-        }
-
-    失敗：
-
-        None
+    下載單一 CSS Resource，失敗回傳 None。
     """
-
     if not url:
-
         return None
 
     if headers is None:
-
         headers = DEFAULT_HEADERS
 
     try:
-
         response = _download_request(
             url,
             headers,
         )
 
     except requests.exceptions.SSLError:
-
         try:
-
             response = _download_ssl_fallback(
                 url,
                 headers,
             )
 
         except requests.RequestException as e:
-
             print(
                 "CSS download failed:"
             )
@@ -1001,7 +639,6 @@ def download_css_resource(
             return None
 
     except requests.RequestException as e:
-
         print(
             "CSS download failed:"
         )
@@ -1014,10 +651,6 @@ def download_css_resource(
 
         return None
 
-    # --------------------------------------------------
-    # MIME Type
-    # --------------------------------------------------
-
     mime_type = response.headers.get(
         "Content-Type",
         "text/css",
@@ -1027,35 +660,20 @@ def download_css_resource(
         ";"
     )[0].strip()
 
-    # --------------------------------------------------
-    # Content
-    # --------------------------------------------------
-
     try:
-
         content = fix_encoding(
             response
         )
 
     except Exception:
-
         content = response.text
 
     if not content:
-
         return None
-
-    # --------------------------------------------------
-    # Content Hash
-    # --------------------------------------------------
 
     content_hash = generate_resource_hash(
         content
     )
-
-    # --------------------------------------------------
-    # File Size
-    # --------------------------------------------------
 
     file_size = len(
         content.encode(
@@ -1063,92 +681,51 @@ def download_css_resource(
         )
     )
 
-    # --------------------------------------------------
-    # Delay
-    # --------------------------------------------------
-
     time.sleep(
         CRAWL_DELAY
     )
 
     return {
-
         "url":
             url,
-
         "content":
             content,
-
         "content_hash":
             content_hash,
-
         "mime_type":
             mime_type,
-
         "file_size":
             file_size,
-
     }
 
-
-# ==================================================
-#
-# Download Image Resource
-#
-# ==================================================
 
 def download_image_resource(
     url,
     headers=None,
 ):
     """
-    下載單一 Image Resource。
-
-    Image 使用：
-
-        bytes
-
-    保存格式：
-
-        {
-            "url": "...",
-            "data": bytes,
-            "content_hash": "...",
-            "mime_type": "...",
-            "file_size": ...
-        }
-
-    失敗：
-
-        None
+    下載單一 Image Resource，使用 bytes 保存，失敗回傳 None。
     """
-
     if not url:
-
         return None
 
     if headers is None:
-
         headers = DEFAULT_HEADERS
 
     try:
-
         response = _download_request(
             url,
             headers,
         )
 
     except requests.exceptions.SSLError:
-
         try:
-
             response = _download_ssl_fallback(
                 url,
                 headers,
             )
 
         except requests.RequestException as e:
-
             print(
                 "Image download failed:"
             )
@@ -1162,7 +739,6 @@ def download_image_resource(
             return None
 
     except requests.RequestException as e:
-
         print(
             "Image download failed:"
         )
@@ -1175,10 +751,6 @@ def download_image_resource(
 
         return None
 
-    # --------------------------------------------------
-    # MIME Type
-    # --------------------------------------------------
-
     mime_type = response.headers.get(
         "Content-Type",
         "",
@@ -1188,14 +760,9 @@ def download_image_resource(
         ";"
     )[0].strip().lower()
 
-    # --------------------------------------------------
-    # Validate Image MIME
-    # --------------------------------------------------
-
     if not mime_type.startswith(
         "image/"
     ):
-
         print(
             "非 Image Resource:"
         )
@@ -1210,65 +777,36 @@ def download_image_resource(
 
         return None
 
-    # --------------------------------------------------
-    # Binary Data
-    # --------------------------------------------------
-
     data = response.content
 
     if not data:
-
         return None
-
-    # --------------------------------------------------
-    # Hash
-    # --------------------------------------------------
 
     content_hash = generate_resource_hash(
         data
     )
 
-    # --------------------------------------------------
-    # File Size
-    # --------------------------------------------------
-
     file_size = len(
         data
     )
-
-    # --------------------------------------------------
-    # Delay
-    # --------------------------------------------------
 
     time.sleep(
         CRAWL_DELAY
     )
 
     return {
-
         "url":
             url,
-
         "data":
             data,
-
         "content_hash":
             content_hash,
-
         "mime_type":
             mime_type,
-
         "file_size":
             file_size,
-
     }
 
-
-# ==================================================
-#
-# Download Resources
-#
-# ==================================================
 
 def download_resources(
     html,
@@ -1276,51 +814,21 @@ def download_resources(
     headers=None,
 ):
     """
-    從 HTML：
-
-        1. 擷取 CSS URL
-        2. 擷取 Image URL
-        3. 下載 CSS
-        4. 下載 Images
-        5. 計算 Hash
-        6. 建立 Resource Metadata
-
-    Returns：
-
-        {
-            "css": [],
-            "images": []
-        }
-
-    注意：
-
-        下載 Resource 失敗
-        不會讓 HTML Crawl 失敗。
+    從 HTML 擷取並下載 CSS 與 Image Resources，計算 Hash 並建立 Resource Metadata；Resource 下載失敗不會讓 HTML Crawl 失敗。
     """
-
     resources = {
-
         "css": [],
-
         "images": [],
-
     }
 
     if not html:
-
         return resources
 
     if not base_url:
-
         return resources
 
     if headers is None:
-
         headers = DEFAULT_HEADERS
-
-    # ==================================================
-    # CSS
-    # ==================================================
 
     css_urls = extract_css_urls(
         html,
@@ -1328,19 +836,13 @@ def download_resources(
     )
 
     for css_url in css_urls:
-
         try:
-
             resource = download_css_resource(
-
                 css_url,
-
                 headers=headers,
-
             )
 
             if resource is not None:
-
                 resources[
                     "css"
                 ].append(
@@ -1348,7 +850,6 @@ def download_resources(
                 )
 
         except Exception as e:
-
             print(
                 "CSS resource processing failed:"
             )
@@ -1359,29 +860,19 @@ def download_resources(
 
             print(e)
 
-    # ==================================================
-    # Images
-    # ==================================================
-
     image_urls = extract_image_urls(
         html,
         base_url,
     )
 
     for image_url in image_urls:
-
         try:
-
             resource = download_image_resource(
-
                 image_url,
-
                 headers=headers,
-
             )
 
             if resource is not None:
-
                 resources[
                     "images"
                 ].append(
@@ -1389,7 +880,6 @@ def download_resources(
                 )
 
         except Exception as e:
-
             print(
                 "Image resource processing failed:"
             )
@@ -1403,102 +893,33 @@ def download_resources(
     return resources
 
 
-# ==================================================
-#
-# Download HTML
-#
-# ==================================================
-
 def download(
     url,
     headers=None,
     retry=3,
 ):
     """
-    下載 HTML。
-
-    保持原本 API：
-
-        download(url)
-            ↓
-        HTML string
-
-    Download Strategy：
-
-        1. Resolve Redirect
-        2. Normal HTTPS
-        3. SSL Certificate Error
-           ↓
-           SSL fallback
-        4. Retry
-        5. 最終失敗 → None
-
-    SSL Optimization：
-
-        同一 Host 第一次發生
-        SSL Certificate Error 後：
-
-            Host
-                ↓
-            SSL fallback cache
-                ↓
-            後續直接 verify=False
-
-    注意：
-
-        本方法只下載 HTML。
-
-        CSS / Images：
-
-            使用 download_resources()
+    下載 HTML，保持原本 API download(url) → HTML string；包含 Redirect、Normal HTTPS、SSL fallback、Retry，最終失敗回傳 None。
     """
-
     if headers is None:
-
         headers = DEFAULT_HEADERS
 
-    # ==================================================
-    # Resolve Redirect
-    # ==================================================
-
     url = resolve_url(
-
         url,
-
         headers,
-
     )
-
-    # ==================================================
-    # Download
-    # ==================================================
 
     for count in range(
         retry
     ):
-
         try:
-
-            # ------------------------------------------
-            # Normal HTTPS
-            #
-            # 若 Host 已經在 SSL fallback cache，
-            # _download_request() 會直接使用
-            # verify=False。
-            # ------------------------------------------
-
             try:
-
                 response = _download_request(
-
                     url,
-
                     headers,
-
                 )
 
             except requests.exceptions.SSLError as ssl_error:
-
                 print(
                     "SSL 憑證驗證失敗:"
                 )
@@ -1512,13 +933,9 @@ def download(
                 )
 
                 try:
-
                     response = _download_ssl_fallback(
-
                         url,
-
                         headers,
-
                     )
 
                     print(
@@ -1526,7 +943,6 @@ def download(
                     )
 
                 except requests.RequestException as fallback_error:
-
                     print(
                         "SSL fallback 失敗:"
                     )
@@ -1537,116 +953,62 @@ def download(
 
                     raise fallback_error
 
-            # ------------------------------------------
-            # HTML Check
-            # ------------------------------------------
-
             content_type = response.headers.get(
-
                 "Content-Type",
-
                 "",
-
             )
 
             if "text/html" not in content_type.lower():
-
                 print(
-
                     "非HTML頁面:",
-
                     content_type,
-
                 )
 
                 return None
-
-            # ------------------------------------------
-            # Encoding Fix
-            # ------------------------------------------
 
             html = fix_encoding(
                 response
             )
 
-            # ------------------------------------------
-            # Empty HTML
-            # ------------------------------------------
-
             if not html.strip():
-
                 print(
                     "下載HTML為空"
                 )
 
                 return None
 
-            # ------------------------------------------
-            # Delay
-            # ------------------------------------------
-
             time.sleep(
                 CRAWL_DELAY
             )
 
-            # ------------------------------------------
-            # Success
-            # ------------------------------------------
-
             return html
 
         except requests.RequestException as e:
-
             print(
-
                 f"下載失敗 "
                 f"{count + 1}/{retry}"
-
             )
 
             print(e)
 
             if count < retry - 1:
-
                 time.sleep(
                     2
                 )
 
-    # ==================================================
-    # Final Failure
-    # ==================================================
-
     return None
 
 
-# ==================================================
-#
-# Public API
-#
-# ==================================================
-
 __all__ = [
-
     "DEFAULT_HEADERS",
-
     "resolve_url",
-
     "fix_encoding",
-
     "download",
-
     "download_resources",
-
     "extract_css_urls",
-
     "extract_image_urls",
-
     "download_css_resource",
-
     "download_image_resource",
-
     "generate_resource_hash",
-
     "normalize_resource_url",
-
 ]

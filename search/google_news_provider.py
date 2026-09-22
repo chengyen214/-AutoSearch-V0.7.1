@@ -20,11 +20,13 @@ Google News Search Provider
         ↓
     V4 Google News Search Engine
         ↓
-    60 Candidate SearchResult[]
+    30 Candidate SearchResult[]
         ↓
     Target crawler_url Exclusion
         ↓
-    20 Valid SearchResult[]
+    Database URL Priority
+        ↓
+    10 Valid SearchResult[]
         ↓
     ProviderSearchAdapter
         ↓
@@ -57,7 +59,9 @@ Google News Search Provider
     - Result Limit
     - 取得全部 Target crawler_url
     - 呼叫 V4 Google News Search
+    - 近 7 天搜尋條件
     - Target Source Exclusion
+    - articles.url Database Priority
     - SearchResult Validation
     - SearchResult Normalization
 
@@ -120,6 +124,28 @@ from services.url_source_grouping_service import (
 )
 
 
+# ==================================================
+#
+# Database
+#
+# ==================================================
+
+from database.connection import (
+    get_connection,
+)
+
+
+# ==================================================
+#
+# Logger
+#
+# ==================================================
+
+from utils.logger import (
+    logger,
+)
+
+
 class GoogleNewsProvider(SearchProvider):
     """
     V5 Google News Search Provider。
@@ -148,11 +174,19 @@ class GoogleNewsProvider(SearchProvider):
             ↓
         V4 Google News Search
             ↓
-        60 Candidate Results
+        近 7 天
+            ↓
+        30 Candidate Results
             ↓
         排除所有 Target Source
             ↓
-        20 Valid Results
+        查 articles.url
+            ↓
+        New URL 優先
+            ↓
+        Existing URL 補足
+            ↓
+        10 Valid Results
     """
 
     # ==================================================
@@ -169,7 +203,7 @@ class GoogleNewsProvider(SearchProvider):
     #
     # ==================================================
 
-    max_results = 20
+    max_results = 10
 
     # ==================================================
     #
@@ -177,7 +211,15 @@ class GoogleNewsProvider(SearchProvider):
     #
     # ==================================================
 
-    candidate_results = 60
+    candidate_results = 30
+
+    # ==================================================
+    #
+    # Search Time Range
+    #
+    # ==================================================
+
+    search_time_range = "when:7d"
 
     # ==================================================
     #
@@ -204,12 +246,6 @@ class GoogleNewsProvider(SearchProvider):
             P2.3 不修改 V4 Search Engine，
             因此此 timeout 暫時只保留
             Provider Configuration Interface。
-
-        注意：
-
-            真正 RSS Request Timeout
-            尚未由本 Provider 注入
-            V4 search_engine.py。
         """
 
         self.timeout = timeout
@@ -240,19 +276,23 @@ class GoogleNewsProvider(SearchProvider):
 
             keyword
                 ↓
-            targets
+            取得全部 Target crawler_url
                 ↓
-            取得全部 crawler_url
+            keyword + when:7d
                 ↓
             V4 search_engine.search()
                 ↓
-            60 Candidate Results
+            30 Candidate Results
                 ↓
-            排除所有 Target Source
+            Target crawler_url exclusion
                 ↓
-            Validate / Normalize
+            articles.url Database Priority
                 ↓
-            最多 20 Valid Results
+            New URL 優先
+                ↓
+            Existing URL 補足
+                ↓
+            最多 10 Valid Results
 
         Parameters
         ----------
@@ -270,10 +310,6 @@ class GoogleNewsProvider(SearchProvider):
                 V4 Google News Search
                 固定先取得 candidate_results
                 筆候選結果。
-
-        Returns
-        -------
-        list[SearchResult]
         """
 
         # ==================================================
@@ -324,15 +360,30 @@ class GoogleNewsProvider(SearchProvider):
 
         # ==================================================
         #
+        # Google News Search Query
+        #
+        # 近 7 天：
+        #
+        #     when:7d
+        #
+        # ==================================================
+
+        search_keyword = (
+            f"{keyword} "
+            f"{self.search_time_range}"
+        )
+
+        # ==================================================
+        #
         # V4 Google News Search
         #
-        # 先取得 60 筆候選結果。
+        # 先取得 30 筆候選結果。
         #
         # ==================================================
 
         source_results = (
             google_news_search(
-                keyword,
+                search_keyword,
                 max_results=self.candidate_results,
             )
         )
@@ -407,7 +458,7 @@ class GoogleNewsProvider(SearchProvider):
 
         最大回傳數：
 
-            20
+            10
         """
 
         if max_results is None:
@@ -455,7 +506,8 @@ class GoogleNewsProvider(SearchProvider):
             - list validation
             - SearchResult validation
             - URL validation
-            - 所有 Target crawler_url exclusion
+            - Target crawler_url exclusion
+            - articles.url Database Priority
             - keyword normalization
             - search_source normalization
             - rank normalization
@@ -463,13 +515,23 @@ class GoogleNewsProvider(SearchProvider):
 
         流程：
 
-            60 Candidate Results
+            30 Candidate Results
                     ↓
-            ALL Target crawler_url exclusion
+            Target crawler_url exclusion
                     ↓
-            Valid Results
+            Valid Candidate URLs
                     ↓
-            最多 20 筆
+            articles.url lookup
+                    ↓
+            New URLs
+                    ↓
+            Existing URLs
+                    ↓
+            New URLs 優先
+                    ↓
+            Existing URLs 補足
+                    ↓
+            最多 10 筆
 
         URL Deduplication：
 
@@ -477,7 +539,8 @@ class GoogleNewsProvider(SearchProvider):
             已經負責 URL Deduplication。
 
             Provider 不重新實作
-            V4 Search Engine 的 Deduplication。
+            V4 Search Engine 的
+            Deduplication。
         """
 
         if source_results is None:
@@ -498,7 +561,16 @@ class GoogleNewsProvider(SearchProvider):
 
             crawler_urls = []
 
-        results = []
+        # ==================================================
+        #
+        # First Stage:
+        # Validate / Target Exclusion
+        #
+        # ==================================================
+
+        candidates = []
+
+        seen_urls = set()
 
         for item in source_results:
 
@@ -536,21 +608,22 @@ class GoogleNewsProvider(SearchProvider):
                 continue
 
             # ------------------------------------------
+            # Local Deduplication Safety
+            #
+            # V4 本身已負責 Deduplication，
+            # 這裡只保護 Provider 自身
+            # 不重複處理。
+            # ------------------------------------------
+
+            if url in seen_urls:
+
+                continue
+
+            # ------------------------------------------
             # Target crawler_url Exclusion
             #
             # 只要符合任何一個 Target crawler_url
             # 就排除。
-            #
-            # 注意：
-            #
-            # crawler_urls 來自：
-            #
-            #     targets
-            #
-            # 的全部 crawler_url。
-            #
-            # 不限制 keyword。
-            #
             # ------------------------------------------
 
             excluded = False
@@ -572,13 +645,139 @@ class GoogleNewsProvider(SearchProvider):
 
                 continue
 
+            seen_urls.add(
+                url
+            )
+
+            candidates.append(
+                (
+                    item,
+                    url,
+                )
+            )
+
+        # ==================================================
+        #
+        # No Candidates
+        #
+        # ==================================================
+
+        if not candidates:
+
+            return []
+
+        # ==================================================
+        #
+        # Database Existing URL Lookup
+        #
+        # ==================================================
+
+        candidate_urls = [
+            url
+            for _, url in candidates
+        ]
+
+        existing_url_set = (
+            cls._get_existing_urls(
+                candidate_urls
+            )
+        )
+
+        # ==================================================
+        #
+        # Split New / Existing
+        #
+        # ==================================================
+
+        new_results = []
+        existing_results = []
+
+        for item, url in candidates:
+
+            if url in existing_url_set:
+
+                existing_results.append(
+                    item
+                )
+
+            else:
+
+                new_results.append(
+                    item
+                )
+
+        # ==================================================
+        #
+        # New URL Priority
+        #
+        # ==================================================
+
+        results = []
+
+        # ------------------------------------------
+        #
+        # First: New URLs
+        #
+        # ------------------------------------------
+
+        for item in new_results:
+
+            results.append(
+                item
+            )
+
+            if len(results) >= max_results:
+
+                break
+
+        # ------------------------------------------
+        #
+        # Second: Existing URLs
+        #
+        # ------------------------------------------
+
+        if len(results) < max_results:
+
+            remaining = (
+                max_results
+                - len(results)
+            )
+
+            results.extend(
+                existing_results[
+                    :remaining
+                ]
+            )
+
+        # ==================================================
+        #
+        # Final Normalize
+        #
+        # ==================================================
+
+        normalized_results = []
+
+        for item in results:
+
             # ------------------------------------------
             # Normalize URL
             # ------------------------------------------
 
+            url = getattr(
+                item,
+                "url",
+                None,
+            )
+
+            if not url:
+
+                continue
+
             try:
 
-                item.url = url
+                item.url = str(
+                    url
+                ).strip()
 
             except AttributeError:
 
@@ -617,33 +816,182 @@ class GoogleNewsProvider(SearchProvider):
             try:
 
                 item.rank = (
-                    len(results) + 1
+                    len(normalized_results)
+                    + 1
                 )
 
             except AttributeError:
 
                 pass
 
-            # ------------------------------------------
-            # Append Valid Result
-            # ------------------------------------------
-
-            results.append(
+            normalized_results.append(
                 item
             )
 
-            # ------------------------------------------
-            # Result Limit
+        return normalized_results
+
+    # ==================================================
+    #
+    # Existing URL Lookup
+    #
+    # ==================================================
+
+    @staticmethod
+    def _get_existing_urls(
+        urls,
+    ):
+        """
+        查詢 MySQL articles.url。
+
+        Parameters
+        ----------
+        urls :
+            Candidate URL list。
+
+        Returns
+        -------
+        set[str]
+
+            已存在於：
+
+                articles.url
+
+            的 URL 集合。
+
+        SQL：
+
+            SELECT url
+            FROM articles
+            WHERE url IN (...)
+        """
+
+        if not urls:
+
+            return set()
+
+        conn = None
+        cursor = None
+
+        try:
+
+            # --------------------------------------------------
+            # Connection
+            # --------------------------------------------------
+
+            conn = get_connection()
+
+            if conn is None:
+
+                logger.warning(
+                    "SQL connection unavailable "
+                    "during Google News URL lookup."
+                )
+
+                return set()
+
+            # --------------------------------------------------
+            # Cursor
+            # --------------------------------------------------
+
+            cursor = conn.cursor()
+
+            # --------------------------------------------------
+            # Placeholder
+            # --------------------------------------------------
+
+            placeholders = ", ".join(
+                ["%s"] * len(urls)
+            )
+
+            # --------------------------------------------------
+            # SQL
+            # --------------------------------------------------
+
+            query = f"""
+                SELECT url
+                FROM articles
+                WHERE url IN ({placeholders})
+            """
+
+            cursor.execute(
+                query,
+                tuple(urls),
+            )
+
+            rows = cursor.fetchall()
+
+            # --------------------------------------------------
+            # Result
+            # --------------------------------------------------
+
+            existing_urls = set()
+
+            for row in rows:
+
+                if not row:
+
+                    continue
+
+                url = row[0]
+
+                if url is None:
+
+                    continue
+
+                existing_urls.add(
+                    str(url).strip()
+                )
+
+            return existing_urls
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to query existing "
+                "Google News Article URLs: "
+                f"error={exc}"
+            )
+
+            # SQL 查詢失敗：
             #
-            # 最多回傳 20 筆。
+            # 不阻斷 Google News Search。
             #
-            # ------------------------------------------
+            # 視為目前沒有確認到
+            # 已存在的 URL。
+            #
+            # 因此全部視為 new URLs。
 
-            if len(results) >= max_results:
+            return set()
 
-                break
+        finally:
 
-        return results
+            # --------------------------------------------------
+            # Close Cursor
+            # --------------------------------------------------
+
+            if cursor is not None:
+
+                try:
+
+                    cursor.close()
+
+                except Exception:
+
+                    pass
+
+            # --------------------------------------------------
+            # Close Connection
+            # --------------------------------------------------
+
+            if conn is not None:
+
+                try:
+
+                    conn.close()
+
+                except Exception:
+
+                    pass
 
 
 # ==================================================

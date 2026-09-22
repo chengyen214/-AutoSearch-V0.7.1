@@ -57,33 +57,6 @@ Archive Viewer
         v
     Browser Render
 
-MongoDB Snapshot：
-
-    {
-        _id
-        url
-        created_at
-        html
-        content_hash
-        mime_type
-        file_size
-
-        resources
-        ├── css[]
-        │   ├── url
-        │   ├── content
-        │   ├── content_hash
-        │   ├── mime_type
-        │   └── file_size
-        │
-        └── images[]
-            ├── url
-            ├── data
-            ├── content_hash
-            ├── mime_type
-            └── file_size
-    }
-
 重要設計：
 
     1. 本 Router 不使用 api/routes/archive.py。
@@ -168,35 +141,16 @@ MongoDB Snapshot：
     14. Resource URL 只在 HTTP Response
         動態改寫。
 
-MongoDB：
+    15. Snapshot HTML 中的 HTTP/HTTPS Link：
 
-    Database:
-        autosearch
+           改寫成：
 
-    Collection:
-        raw_html
+           http://127.0.0.1:8000/archive/view?url=...
 
-MongoDB Configuration：
+       並以新分頁開啟。
 
-    使用：
-
-        config.mongo_config.MONGO_URI
-        config.mongo_config.MONGO_DATABASE
-        config.mongo_config.MONGO_RAW_HTML_COLLECTION
-
-不負責：
-
-    - Crawl
-    - HTTP Download
-    - Parser
-    - Article
-    - AI
-    - Knowledge Archive
-    - Archive Version Creation
-    - Search
-    - Search Ranking
-    - archive.py
-    - RawHTMLRepository
+       該 URL 的 Archive Viewer
+       再由使用者選擇 Snapshot。
 """
 
 
@@ -213,7 +167,10 @@ from datetime import (
 
 from html import (
     escape,
+    unescape,
 )
+
+import re
 
 from typing import (
     Any,
@@ -224,6 +181,7 @@ from urllib.parse import (
     quote,
     unquote,
     urljoin,
+    urlsplit,
 )
 
 
@@ -241,6 +199,7 @@ from fastapi import (
 )
 
 from fastapi.responses import (
+    RedirectResponse,
     Response,
 )
 
@@ -311,10 +270,6 @@ def get_mongo_collection():
 
     global _client
 
-    # ========================================================
-    # Validate Configuration
-    # ========================================================
-
     if not MONGO_URI:
 
         raise RuntimeError(
@@ -334,10 +289,6 @@ def get_mongo_collection():
             "is not configured."
         )
 
-    # ========================================================
-    # Lazy MongoClient
-    # ========================================================
-
     if _client is None:
 
         logger.info(
@@ -349,10 +300,6 @@ def get_mongo_collection():
         _client = MongoClient(
             MONGO_URI,
         )
-
-    # ========================================================
-    # Collection
-    # ========================================================
 
     database = _client[
         MONGO_DATABASE
@@ -398,10 +345,6 @@ def normalize_url(
 
         return None
 
-    # ========================================================
-    # Markdown Link
-    # ========================================================
-
     if (
         url.startswith("[")
         and "](" in url
@@ -445,10 +388,6 @@ def normalize_created_at(
 
         return None
 
-    # ========================================================
-    # datetime
-    # ========================================================
-
     if isinstance(
         created_at,
         datetime,
@@ -463,10 +402,6 @@ def normalize_created_at(
         return created_at.astimezone(
             timezone.utc,
         )
-
-    # ========================================================
-    # ISO 8601 String
-    # ========================================================
 
     if isinstance(
         created_at,
@@ -511,10 +446,6 @@ def normalize_created_at(
             timezone.utc,
         )
 
-    # ========================================================
-    # Unsupported Type
-    # ========================================================
-
     logger.warning(
         "Archive Viewer unsupported "
         "created_at type: "
@@ -543,6 +474,144 @@ def format_created_at(
         return None
 
     return normalized.isoformat()
+
+
+# ============================================================
+#
+# Build Archive Viewer URL
+#
+# ============================================================
+
+def build_archive_view_url(
+    target_url: str,
+    archive_base_url: str,
+    version: str | None = None,
+) -> str:
+    """
+    建立完整 Archive Viewer URL。
+
+    例如：
+
+        target_url：
+
+            https://www.digitimes.com.tw/
+            research/report-category/?CnlID=3&cat=ICM
+
+        archive_base_url：
+
+            http://127.0.0.1:8000
+
+        結果：
+
+            http://127.0.0.1:8000/archive/view?
+            url=https%3A%2F%2Fwww.digitimes.com.tw%2F...
+    """
+
+    target_url = normalize_url(
+        target_url
+    )
+
+    if not target_url:
+
+        return archive_base_url + "/archive/view"
+
+    parsed = urlsplit(
+        target_url
+    )
+
+    target_url_without_fragment = (
+        parsed._replace(
+            fragment=""
+        ).geturl()
+    )
+
+    archive_url = (
+        archive_base_url.rstrip("/")
+        + "/archive/view?url="
+        + quote(
+            target_url_without_fragment,
+            safe="",
+        )
+    )
+
+    if version:
+
+        archive_url += (
+            "&version="
+            + quote(
+                version,
+                safe="",
+            )
+        )
+
+    return archive_url
+
+
+# ============================================================
+#
+# Build Snapshot URL
+#
+# ============================================================
+
+def build_archive_snapshot_url(
+    target_url: str,
+    version: str,
+    archive_base_url: str,
+) -> str:
+    """
+    建立 Archive Snapshot URL。
+    """
+
+    return (
+        archive_base_url.rstrip("/")
+        + "/archive/snapshot?url="
+        + quote(
+            target_url,
+            safe="",
+        )
+        + "&version="
+        + quote(
+            version,
+            safe="",
+        )
+    )
+
+
+# ============================================================
+#
+# Build Archive Base URL
+#
+# ============================================================
+
+def get_archive_base_url(
+    request: Request,
+) -> str:
+    """
+    根據目前 AutoSearch Request 建立
+    Archive Viewer Base URL。
+
+    例如：
+
+        http://127.0.0.1:8000
+
+    不使用：
+
+        archived article 的 domain。
+
+    因此：
+
+        https://www.digitimes.com.tw
+
+    只會作為 target article URL，
+
+    不會變成 Archive Viewer Host。
+    """
+
+    return (
+        f"{request.url.scheme}"
+        f"://"
+        f"{request.url.netloc}"
+    )
 
 
 # ============================================================
@@ -600,10 +669,6 @@ def find_snapshot_history(
 
             version = created_at.isoformat()
 
-            # =================================================
-            # Prevent duplicate created_at
-            # =================================================
-
             if version in seen_versions:
 
                 continue
@@ -635,6 +700,67 @@ def find_snapshot_history(
         logger.exception(
             "Archive Viewer failed to query "
             "Snapshot History: "
+            f"url={url}, "
+            f"error={e}"
+        )
+
+        raise
+
+
+# ============================================================
+#
+# Find Latest Snapshot Version
+#
+# ============================================================
+
+def find_latest_snapshot_version(
+    url: str,
+) -> str | None:
+    """
+    查詢指定 URL 最新的 Snapshot。
+    """
+
+    collection = get_mongo_collection()
+
+    try:
+
+        document = collection.find_one(
+            {
+                "url": url,
+            },
+            {
+                "_id": 0,
+                "created_at": 1,
+            },
+            sort=[
+                (
+                    "created_at",
+                    -1,
+                ),
+            ],
+        )
+
+        if document is None:
+
+            return None
+
+        created_at = normalize_created_at(
+            document.get(
+                "created_at"
+            )
+        )
+
+        if created_at is None:
+
+            return None
+
+        return created_at.isoformat()
+
+    except Exception as e:
+
+        logger.exception(
+            "Archive Viewer failed to find "
+            "latest Snapshot: "
             f"url={url}, "
             f"error={e}"
         )
@@ -716,23 +842,10 @@ def find_snapshot(
 def extract_html(
     snapshot: dict[str, Any] | None,
 ) -> str | None:
-    """
-    從 MongoDB Snapshot 取得 Raw HTML。
-
-    優先：
-
-        html
-        raw_html
-        content
-    """
 
     if not snapshot:
 
         return None
-
-    # ========================================================
-    # Preferred: html
-    # ========================================================
 
     html = snapshot.get(
         "html"
@@ -745,10 +858,6 @@ def extract_html(
 
         return html
 
-    # ========================================================
-    # raw_html
-    # ========================================================
-
     raw_html = snapshot.get(
         "raw_html"
     )
@@ -759,10 +868,6 @@ def extract_html(
     ) and raw_html:
 
         return raw_html
-
-    # ========================================================
-    # content
-    # ========================================================
 
     content = snapshot.get(
         "content"
@@ -858,16 +963,6 @@ def build_snapshot_metadata(
 def get_snapshot_resources(
     snapshot: dict[str, Any] | None,
 ) -> dict[str, list]:
-    """
-    取得 Snapshot Resources。
-
-    MongoDB：
-
-        resources.css[]
-        resources.images[]
-
-    不修改 Snapshot。
-    """
 
     if not snapshot:
 
@@ -921,9 +1016,6 @@ def get_snapshot_resources(
 def normalize_resource_url(
     resource_url: Any,
 ) -> str | None:
-    """
-    正規化 MongoDB Resource URL。
-    """
 
     if resource_url is None:
 
@@ -949,17 +1041,6 @@ def resolve_resource_url(
     resource_url: str,
     original_url: str,
 ) -> str:
-    """
-    將 Resource URL 轉成絕對 URL。
-
-    支援：
-
-        https://...
-        http://...
-        /css/main.css
-        css/main.css
-        ../css/main.css
-    """
 
     if not resource_url:
 
@@ -982,13 +1063,6 @@ def find_css_resource(
     resource_url: str,
     original_url: str,
 ) -> dict[str, Any] | None:
-    """
-    在 MongoDB：
-
-        resources.css[]
-
-    找到指定 CSS。
-    """
 
     resources = get_snapshot_resources(
         snapshot
@@ -1042,13 +1116,6 @@ def find_image_resource(
     resource_url: str,
     original_url: str,
 ) -> dict[str, Any] | None:
-    """
-    在 MongoDB：
-
-        resources.images[]
-
-    找到指定 Image。
-    """
 
     resources = get_snapshot_resources(
         snapshot
@@ -1106,11 +1173,6 @@ def find_image_resource(
 def encode_resource_identifier(
     resource_url: str,
 ) -> str:
-    """
-    將原始 Resource URL 放入 path。
-
-    使用 URL encoding。
-    """
 
     return quote(
         resource_url,
@@ -1136,9 +1198,6 @@ def decode_resource_identifier(
 def extract_css_content(
     resource: dict[str, Any] | None,
 ) -> str | bytes | None:
-    """
-    取得 MongoDB CSS content。
-    """
 
     if not resource:
 
@@ -1164,18 +1223,6 @@ def extract_css_content(
 def extract_image_data(
     resource: dict[str, Any] | None,
 ) -> bytes | str | None:
-    """
-    取得 MongoDB Image data。
-
-    支援：
-
-        bytes
-        str
-
-    注意：
-
-        不改變 MongoDB data。
-    """
 
     if not resource:
 
@@ -1200,29 +1247,144 @@ def extract_image_data(
 
 # ============================================================
 #
-# Prepare Snapshot HTML
+# Archive Link Helpers
 #
 # ============================================================
 
-def prepare_snapshot_html(
-    html: str,
-    original_url: str,
-    snapshot: dict[str, Any],
-    snapshot_version: str,
+def should_rewrite_archive_link(
+    href: str,
+) -> bool:
+    """
+    判斷 HTML Link 是否需要改成
+    Archive Viewer。
+
+    不改寫：
+
+        #anchor
+        mailto:
+        tel:
+        javascript:
+        data:
+        blob:
+        /archive/...
+    """
+
+    if not href:
+
+        return False
+
+    value = href.strip()
+
+    if not value:
+
+        return False
+
+    if value.startswith(
+        "/archive/"
+    ):
+
+        return False
+
+    if value.startswith(
+        "#"
+    ):
+
+        return False
+
+    lowered = value.lower()
+
+    excluded_schemes = (
+        "mailto:",
+        "tel:",
+        "javascript:",
+        "data:",
+        "blob:",
+    )
+
+    if lowered.startswith(
+        excluded_schemes
+    ):
+
+        return False
+
+    return True
+
+
+# ============================================================
+#
+# Rewrite Anchor Attributes
+#
+# ============================================================
+
+def force_new_tab(
+    attrs: str,
 ) -> str:
     """
-    準備 Snapshot HTML 供 Browser Render。
+    確保 Anchor：
 
-    主要工作：
+        target="_blank"
+        rel="noopener noreferrer"
 
-        1. 保留原始 HTML
-        2. 加入 <base>
-        3. 將 MongoDB CSS URL
-           改成 Archive Viewer CSS URL
-        4. 將 MongoDB Image URL
-           改成 Archive Viewer Image URL
+    如果原本存在 target / rel，
+    直接移除後重新加入。
 
-    MongoDB Snapshot 不修改。
+    這樣可以避免：
+
+        target="_self"
+
+    或其他舊 target 造成 Archive Viewer
+    沒有開啟新分頁。
+    """
+
+    attrs = re.sub(
+        r"""\s+\btarget\s*=\s*(?:"[^"]*"|'[^']*')""",
+        "",
+        attrs,
+        flags=re.IGNORECASE,
+    )
+
+    attrs = re.sub(
+        r"""\s+\brel\s*=\s*(?:"[^"]*"|'[^']*')""",
+        "",
+        attrs,
+        flags=re.IGNORECASE,
+    )
+
+    return (
+        attrs.rstrip()
+        + ' target="_blank"'
+        + ' rel="noopener noreferrer"'
+    )
+
+
+# ============================================================
+#
+# Rewrite Archive Links
+#
+# ============================================================
+
+def rewrite_archive_links(
+    html: str,
+    original_url: str,
+    archive_base_url: str,
+) -> str:
+    """
+    將 Snapshot HTML 中的 HTTP/HTTPS/相對 Link
+    動態改寫成 Archive Viewer URL。
+
+    行為：
+
+        Article Link
+            ↓
+        http://127.0.0.1:8000/archive/view?url=...
+
+        並使用：
+
+            target="_blank"
+
+        開啟新的 Archive Viewer 分頁。
+
+    MongoDB 原始 HTML 不修改。
     """
 
     if not html:
@@ -1234,8 +1396,182 @@ def prepare_snapshot_html(
         return html
 
     # ========================================================
-    # Resource Information
+    # 找完整 <a ...> 開始標籤。
+    #
+    # 比原本只抓 href value 更安全，
+    # 可以正確保留 / 處理 href 後面的 attributes。
     # ========================================================
+
+    anchor_pattern = re.compile(
+        r"""<a\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>""",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    href_pattern = re.compile(
+        r"""\bhref\s*=\s*(["'])(.*?)\1""",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def replace_anchor(
+        match: re.Match,
+    ) -> str:
+
+        attrs = match.group(
+            "attrs"
+        )
+
+        href_match = href_pattern.search(
+            attrs
+        )
+
+        if href_match is None:
+
+            return match.group(
+                0
+            )
+
+        raw_href = href_match.group(
+            2
+        )
+
+        href = unescape(
+            raw_href
+        ).strip()
+
+        if not should_rewrite_archive_link(
+            href
+        ):
+
+            return match.group(
+                0
+            )
+
+        absolute_url = urljoin(
+            original_url,
+            href,
+        )
+
+        if not absolute_url:
+
+            return match.group(
+                0
+            )
+
+        parsed = urlsplit(
+            absolute_url
+        )
+
+        if parsed.scheme.lower() not in (
+            "http",
+            "https",
+        ):
+
+            return match.group(
+                0
+            )
+
+        # ====================================================
+        # Fragment 不屬於 MongoDB Snapshot Identity。
+        #
+        # 因此 Archive Viewer Target URL
+        # 不帶 fragment。
+        # ====================================================
+
+        archive_target_url = parsed._replace(
+            fragment=""
+        ).geturl()
+
+        # ====================================================
+        # 建立真正的 Local Archive Viewer URL。
+        #
+        # 例如：
+        #
+        # http://127.0.0.1:8000/archive/view?
+        # url=https%3A%2F%2Fwww.digitimes.com.tw%2F...
+        #
+        # 注意：
+        #
+        # archive_base_url
+        # 是 AutoSearch Server，
+        # 不是 archived website。
+        # ====================================================
+
+        archive_link = build_archive_view_url(
+            archive_target_url,
+            archive_base_url,
+        )
+
+        escaped_archive_link = escape(
+            archive_link,
+            quote=True,
+        )
+
+        # ====================================================
+        # 替換 href value
+        # ====================================================
+
+        new_attrs = (
+            attrs[
+                :href_match.start(2)
+            ]
+            + escaped_archive_link
+            + attrs[
+                href_match.end(2):
+            ]
+        )
+
+        # ====================================================
+        # 強制新分頁
+        # ====================================================
+
+        new_attrs = force_new_tab(
+            new_attrs
+        )
+
+        rewritten_tag = (
+            "<a"
+            + new_attrs
+            + ">"
+        )
+
+        return rewritten_tag
+
+    rewritten_html = anchor_pattern.sub(
+        replace_anchor,
+        html,
+    )
+
+    logger.info(
+        "Archive Viewer rewritten HTML links: "
+        f"original_url={original_url}, "
+        f"archive_base_url={archive_base_url}, "
+        f"html_length={len(rewritten_html)}"
+    )
+
+    return rewritten_html
+
+
+# ============================================================
+#
+# Prepare Snapshot HTML
+#
+# ============================================================
+
+def prepare_snapshot_html(
+    html: str,
+    original_url: str,
+    snapshot: dict[str, Any],
+    snapshot_version: str,
+    archive_base_url: str,
+) -> str:
+
+    if not html:
+
+        return html
+
+    if not original_url:
+
+        return html
 
     resources = get_snapshot_resources(
         snapshot
@@ -1248,10 +1584,6 @@ def prepare_snapshot_html(
     image_resources = resources[
         "images"
     ]
-
-    # ========================================================
-    # Resource URL Rewriter
-    # ========================================================
 
     rewritten_html = html
 
@@ -1288,7 +1620,8 @@ def prepare_snapshot_html(
         )
 
         archive_css_url = (
-            "/archive/resource/css/"
+            archive_base_url.rstrip("/")
+            + "/archive/resource/css/"
             + encoded_url
             + "?url="
             + quote(
@@ -1301,10 +1634,6 @@ def prepare_snapshot_html(
                 safe="",
             )
         )
-
-        # ----------------------------------------------------
-        # Replace original resource URL
-        # ----------------------------------------------------
 
         rewritten_html = rewritten_html.replace(
             absolute_url,
@@ -1349,7 +1678,8 @@ def prepare_snapshot_html(
         )
 
         archive_image_url = (
-            "/archive/resource/image/"
+            archive_base_url.rstrip("/")
+            + "/archive/resource/image/"
             + encoded_url
             + "?url="
             + quote(
@@ -1363,10 +1693,6 @@ def prepare_snapshot_html(
             )
         )
 
-        # ----------------------------------------------------
-        # Replace original resource URL
-        # ----------------------------------------------------
-
         rewritten_html = rewritten_html.replace(
             absolute_url,
             archive_image_url,
@@ -1376,6 +1702,16 @@ def prepare_snapshot_html(
             resource_url,
             archive_image_url,
         )
+
+    # ========================================================
+    # Archive HTML Links
+    # ========================================================
+
+    rewritten_html = rewrite_archive_links(
+        rewritten_html,
+        original_url,
+        archive_base_url,
+    )
 
     # ========================================================
     # Escape Base URL
@@ -1390,17 +1726,9 @@ def prepare_snapshot_html(
         f'<base href="{safe_base_url}">'
     )
 
-    # ========================================================
-    # Detect Existing Base
-    # ========================================================
-
     lower_html = rewritten_html.lower()
 
     if "<base " not in lower_html:
-
-        # ====================================================
-        # Inject into <head>
-        # ====================================================
 
         head_start = lower_html.find(
             "<head"
@@ -1436,19 +1764,139 @@ def prepare_snapshot_html(
                 + rewritten_html
             )
 
-    # ========================================================
-    # Logging
-    # ========================================================
-
     logger.info(
         "Archive Viewer prepared snapshot HTML: "
         f"original_url={original_url}, "
+        f"archive_base_url={archive_base_url}, "
         f"css_resources={len(css_resources)}, "
         f"image_resources={len(image_resources)}, "
         f"html_length={len(rewritten_html)}"
     )
 
     return rewritten_html
+
+
+# ============================================================
+#
+# Archive Link Redirect
+#
+# ============================================================
+
+@router.get(
+    "/link",
+    include_in_schema=False,
+)
+def archive_link(
+    url: str = Query(
+        ...,
+        min_length=1,
+        description="Target URL from archived HTML.",
+    ),
+):
+    """
+    舊版 Archive Link Router。
+
+    注意：
+
+        新的 Archived HTML 不再使用此 Router。
+
+    保留此 Route 是為了避免既有舊連結直接失效。
+    """
+
+    normalized_url = normalize_url(
+        url
+    )
+
+    if not normalized_url:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid archive link URL.",
+        )
+
+    parsed_url = urlsplit(
+        normalized_url
+    )
+
+    if parsed_url.scheme.lower() not in (
+        "http",
+        "https",
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Archive link only supports "
+                "HTTP and HTTPS URLs."
+            ),
+        )
+
+    lookup_url = parsed_url._replace(
+        fragment=""
+    ).geturl()
+
+    try:
+
+        latest_version = find_latest_snapshot_version(
+            lookup_url
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Archive Link Snapshot lookup failed: "
+            f"url={lookup_url}"
+        )
+
+        return RedirectResponse(
+            url=normalized_url,
+            status_code=307,
+        )
+
+    if latest_version is not None:
+
+        archive_snapshot_url = (
+            "/archive/snapshot"
+            "?url="
+            + quote(
+                lookup_url,
+                safe="",
+            )
+            + "&version="
+            + quote(
+                latest_version,
+                safe="",
+            )
+        )
+
+        if parsed_url.fragment:
+
+            archive_snapshot_url += (
+                "#"
+                + parsed_url.fragment
+            )
+
+        logger.info(
+            "Archive Link redirected to Snapshot: "
+            f"url={lookup_url}, "
+            f"version={latest_version}"
+        )
+
+        return RedirectResponse(
+            url=archive_snapshot_url,
+            status_code=307,
+        )
+
+    logger.info(
+        "Archive Link no Snapshot, "
+        "redirecting to original URL: "
+        f"url={normalized_url}"
+    )
+
+    return RedirectResponse(
+        url=normalized_url,
+        status_code=307,
+    )
 
 
 # ============================================================
@@ -1491,16 +1939,12 @@ def archive_view(
             url=...
             &version=...
 
-    Viewer iframe 將自行載入：
+    Viewer iframe：
 
         /archive/snapshot?
             url=...
             &version=...
     """
-
-    # ========================================================
-    # Normalize URL
-    # ========================================================
 
     normalized_url = normalize_url(
         url
@@ -1512,10 +1956,6 @@ def archive_view(
             status_code=400,
             detail="Invalid archive article URL.",
         )
-
-    # ========================================================
-    # Normalize Version
-    # ========================================================
 
     requested_created_at = None
 
@@ -1536,9 +1976,9 @@ def archive_view(
                 ),
             )
 
-    # ========================================================
-    # Snapshot History
-    # ========================================================
+    archive_base_url = get_archive_base_url(
+        request
+    )
 
     try:
 
@@ -1557,9 +1997,35 @@ def archive_view(
         )
 
     # ========================================================
-    # Initial View
+    # Build stable Viewer URLs
     #
-    # 不載入 HTML。
+    # 所有 History Button 都由 Python 建立。
+    # ========================================================
+
+    for item in versions:
+
+        version_value = item.get(
+            "version"
+        )
+
+        if version_value:
+
+            item[
+                "view_url"
+            ] = build_archive_view_url(
+                normalized_url,
+                archive_base_url,
+                version_value,
+            )
+
+        else:
+
+            item[
+                "view_url"
+            ] = None
+
+    # ========================================================
+    # Initial View
     # ========================================================
 
     if requested_created_at is None:
@@ -1589,6 +2055,9 @@ def archive_view(
                     None,
 
                 "selected_created_at":
+                    None,
+
+                "snapshot_url":
                     None,
 
                 "html":
@@ -1632,10 +2101,6 @@ def archive_view(
 
             break
 
-    # ========================================================
-    # Requested Snapshot Does Not Exist
-    # ========================================================
-
     if selected_version is None:
 
         logger.warning(
@@ -1652,21 +2117,17 @@ def archive_view(
             ),
         )
 
-    # ========================================================
-    # Viewer UI
-    #
-    # HTML 不在這裡載入。
-    #
-    # iframe：
-    #
-    #     /archive/snapshot
-    #
-    # ========================================================
+    snapshot_url = build_archive_snapshot_url(
+        normalized_url,
+        requested_version,
+        archive_base_url,
+    )
 
     logger.info(
         "Archive Viewer selected snapshot UI: "
         f"url={normalized_url}, "
-        f"version={requested_version}"
+        f"version={requested_version}, "
+        f"snapshot_url={snapshot_url}"
     )
 
     return templates.TemplateResponse(
@@ -1692,6 +2153,9 @@ def archive_view(
                 selected_version.get(
                     "created_at"
                 ),
+
+            "snapshot_url":
+                snapshot_url,
 
             "html":
                 None,
@@ -1723,6 +2187,7 @@ def archive_view(
     include_in_schema=False,
 )
 def archive_snapshot(
+    request: Request,
     url: str = Query(
         ...,
         min_length=1,
@@ -1735,45 +2200,6 @@ def archive_snapshot(
         ),
     ),
 ):
-    """
-    直接呈現 MongoDB 中的 Snapshot HTML。
-
-    Flow：
-
-        URL
-        +
-        created_at
-             |
-             v
-        MongoDB raw_html
-             |
-             v
-        Raw HTML
-             |
-             v
-        Resource URL Rewrite
-             |
-             +-------------------------+
-             |                         |
-             v                         v
-        MongoDB CSS               MongoDB Image
-             |                         |
-             v                         v
-        Archive Resource URLs
-             |
-             v
-        Inject <base>
-             |
-             v
-        HTTP text/html
-             |
-             v
-        Browser Render
-    """
-
-    # ========================================================
-    # Normalize URL
-    # ========================================================
 
     normalized_url = normalize_url(
         url
@@ -1785,10 +2211,6 @@ def archive_snapshot(
             status_code=400,
             detail="Invalid archive article URL.",
         )
-
-    # ========================================================
-    # Normalize Version
-    # ========================================================
 
     requested_created_at = normalize_created_at(
         version
@@ -1804,10 +2226,6 @@ def archive_snapshot(
                 "ISO 8601 created_at datetime."
             ),
         )
-
-    # ========================================================
-    # Find Snapshot
-    # ========================================================
 
     try:
 
@@ -1834,10 +2252,6 @@ def archive_snapshot(
             ),
         )
 
-    # ========================================================
-    # Extract HTML
-    # ========================================================
-
     html = extract_html(
         snapshot
     )
@@ -1857,22 +2271,6 @@ def archive_snapshot(
             ),
         )
 
-    # ========================================================
-    # Determine Original URL
-    #
-    # 優先：
-    #
-    #     resolved_url
-    #
-    # 其次：
-    #
-    #     url
-    #
-    # 最後：
-    #
-    #     normalized_url
-    # ========================================================
-
     original_url = (
         snapshot.get(
             "resolved_url"
@@ -1887,38 +2285,36 @@ def archive_snapshot(
         original_url
     ).strip()
 
-    # ========================================================
-    # Snapshot Version
-    # ========================================================
-
     snapshot_version = (
         requested_created_at.isoformat()
     )
 
     # ========================================================
-    # Prepare HTML
+    # 重要：
     #
-    # MongoDB Snapshot 不修改。
+    # Archive Base URL 使用 AutoSearch Server，
+    # 不使用 original_url 的 domain。
     #
-    # CSS / Image URL：
+    # 因此：
     #
-    #     MongoDB
-    #         ↓
-    #     Archive Resource Endpoint
-    #         ↓
-    #     Browser
+    # original_url:
+    #     https://www.digitimes.com.tw/...
+    #
+    # archive_base_url:
+    #     http://127.0.0.1:8000
     # ========================================================
+
+    archive_base_url = get_archive_base_url(
+        request
+    )
 
     prepared_html = prepare_snapshot_html(
         html,
         original_url,
         snapshot,
         snapshot_version,
+        archive_base_url,
     )
-
-    # ========================================================
-    # Logging
-    # ========================================================
 
     resources = get_snapshot_resources(
         snapshot
@@ -1929,14 +2325,11 @@ def archive_snapshot(
         f"url={normalized_url}, "
         f"version={snapshot_version}, "
         f"original_url={original_url}, "
+        f"archive_base_url={archive_base_url}, "
         f"html_length={len(prepared_html)}, "
         f"css_resources={len(resources['css'])}, "
         f"image_resources={len(resources['images'])}"
     )
-
-    # ========================================================
-    # Direct HTML Response
-    # ========================================================
 
     return Response(
         content=prepared_html,
@@ -1972,36 +2365,6 @@ def archive_css_resource(
         ),
     ),
 ):
-    """
-    從 MongoDB：
-
-        resources.css[]
-
-    提供 CSS。
-
-    Flow：
-
-        Browser
-            |
-            v
-        /archive/resource/css/...
-            |
-            v
-        MongoDB Snapshot
-            |
-            v
-        resources.css[]
-            |
-            v
-        content
-            |
-            v
-        text/css
-    """
-
-    # ========================================================
-    # Normalize URL
-    # ========================================================
 
     normalized_url = normalize_url(
         url
@@ -2013,10 +2376,6 @@ def archive_css_resource(
             status_code=400,
             detail="Invalid archive article URL.",
         )
-
-    # ========================================================
-    # Normalize Version
-    # ========================================================
 
     requested_created_at = normalize_created_at(
         version
@@ -2031,19 +2390,11 @@ def archive_css_resource(
             ),
         )
 
-    # ========================================================
-    # Decode Resource URL
-    # ========================================================
-
     decoded_resource_url = (
         decode_resource_identifier(
             resource_url
         )
     )
-
-    # ========================================================
-    # Find Snapshot
-    # ========================================================
 
     try:
 
@@ -2070,10 +2421,6 @@ def archive_css_resource(
             ),
         )
 
-    # ========================================================
-    # Original URL
-    # ========================================================
-
     original_url = (
         snapshot.get(
             "resolved_url"
@@ -2087,10 +2434,6 @@ def archive_css_resource(
     original_url = str(
         original_url
     ).strip()
-
-    # ========================================================
-    # Find CSS
-    # ========================================================
 
     css_resource = find_css_resource(
         snapshot,
@@ -2114,10 +2457,6 @@ def archive_css_resource(
             ),
         )
 
-    # ========================================================
-    # Extract CSS
-    # ========================================================
-
     css_content = extract_css_content(
         css_resource
     )
@@ -2131,10 +2470,6 @@ def archive_css_resource(
             ),
         )
 
-    # ========================================================
-    # MIME Type
-    # ========================================================
-
     mime_type = (
         css_resource.get(
             "mime_type"
@@ -2145,10 +2480,6 @@ def archive_css_resource(
     mime_type = str(
         mime_type
     )
-
-    # ========================================================
-    # Response
-    # ========================================================
 
     logger.info(
         "Archive CSS resource served: "
@@ -2191,36 +2522,6 @@ def archive_image_resource(
         ),
     ),
 ):
-    """
-    從 MongoDB：
-
-        resources.images[]
-
-    提供 Image。
-
-    Flow：
-
-        Browser
-            |
-            v
-        /archive/resource/image/...
-            |
-            v
-        MongoDB Snapshot
-            |
-            v
-        resources.images[]
-            |
-            v
-        data
-            |
-            v
-        image/*
-    """
-
-    # ========================================================
-    # Normalize URL
-    # ========================================================
 
     normalized_url = normalize_url(
         url
@@ -2232,10 +2533,6 @@ def archive_image_resource(
             status_code=400,
             detail="Invalid archive article URL.",
         )
-
-    # ========================================================
-    # Normalize Version
-    # ========================================================
 
     requested_created_at = normalize_created_at(
         version
@@ -2250,19 +2547,11 @@ def archive_image_resource(
             ),
         )
 
-    # ========================================================
-    # Decode Resource URL
-    # ========================================================
-
     decoded_resource_url = (
         decode_resource_identifier(
             resource_url
         )
     )
-
-    # ========================================================
-    # Find Snapshot
-    # ========================================================
 
     try:
 
@@ -2289,10 +2578,6 @@ def archive_image_resource(
             ),
         )
 
-    # ========================================================
-    # Original URL
-    # ========================================================
-
     original_url = (
         snapshot.get(
             "resolved_url"
@@ -2306,10 +2591,6 @@ def archive_image_resource(
     original_url = str(
         original_url
     ).strip()
-
-    # ========================================================
-    # Find Image
-    # ========================================================
 
     image_resource = find_image_resource(
         snapshot,
@@ -2333,10 +2614,6 @@ def archive_image_resource(
             ),
         )
 
-    # ========================================================
-    # Extract Image Data
-    # ========================================================
-
     image_data = extract_image_data(
         image_resource
     )
@@ -2350,10 +2627,6 @@ def archive_image_resource(
             ),
         )
 
-    # ========================================================
-    # MIME Type
-    # ========================================================
-
     mime_type = (
         image_resource.get(
             "mime_type"
@@ -2364,10 +2637,6 @@ def archive_image_resource(
     mime_type = str(
         mime_type
     )
-
-    # ========================================================
-    # Response
-    # ========================================================
 
     logger.info(
         "Archive Image resource served: "

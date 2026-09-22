@@ -12,6 +12,7 @@ Crawl Service
     將 V5 Pipeline 的 URL
     交給底層 crawler.py 執行 HTTP Download。
 
+
 架構：
 
     SearchResult / Target
@@ -21,24 +22,35 @@ Crawl Service
         crawler.py
             ↓
         Raw HTML
-            ↓
-        Content Hash
-            ↓
-        Resource Download
-            ↓
-        CrawlResult
-            ↓
-        RawHTMLRepository
-            ↓
-        MongoDB
-            ↓
-        ParserService
-            ↓
-        ParsedArticle
-            ↓
-        ArticleService
-            ↓
-        MySQL Article
+            │
+            ├──────────────────────────────┐
+            │                              │
+            ▼                              ▼
+    KeywordProcessor                 原本 Crawl 流程
+            ↓                              │
+    Processed Keyword                      │
+            ↓                              ▼
+    KeywordLinkDetector               Content Hash
+            ↓                              │
+      Related URLs                         ▼
+            ↓                        Resource Download
+    RelatedCrawlService                    │
+            │                              ▼
+            │                         CrawlResult
+            │                              │
+            │                              ▼
+            │                     RawHTMLRepository
+            │                              │
+            │                              ▼
+            │                           MongoDB
+            │
+            └──→ Related Crawl
+                     ↓
+                   Crawl
+                     ↓
+                   Parser
+                     ↓
+                  Article
 
 
 Raw HTML MongoDB Structure：
@@ -68,10 +80,15 @@ Raw HTML MongoDB Structure：
     - 取得 Raw HTML
     - 計算 Raw HTML Content Hash
     - 取得 CSS / Image Resources
+    - Keyword Processing
+    - Keyword Link Detection
+    - 取得 Related URLs
+    - 呼叫 RelatedCrawlService
     - 建立 CrawlResult
     - 將成功 CrawlResult 保存至 MongoDB
     - Crawl Error Handling
     - 基本 URL Validation
+
 
 不負責：
 
@@ -88,6 +105,7 @@ Raw HTML MongoDB Structure：
     - Archive Business Logic
     - Duplicate Detection
     - Archive Version
+    - RelatedCrawlService implementation
     - AI
     - AI Task
 
@@ -105,12 +123,25 @@ Raw HTML MongoDB Structure：
              ↓
             Resource Download
 
+
     CrawlService
         負責：
 
             V5 Pipeline
                 ↓
             Crawl
+                ↓
+            Raw HTML
+                ↓
+            KeywordProcessor
+                ↓
+            KeywordLinkDetector
+                ↓
+            Related URLs
+                ↓
+            RelatedCrawlService
+                ↓
+            回到原本 Crawl Flow
                 ↓
             Hash
                 ↓
@@ -120,12 +151,44 @@ Raw HTML MongoDB Structure：
                 ↓
             Raw HTML Persistence
 
+
+    KeywordLinkDetector
+        負責：
+
+            HTML
+              +
+            Processed Keyword
+              ↓
+            Related URLs
+
+        SQL Priority：
+
+            MySQL
+                ↓
+            articles.url
+                ↓
+            未存在 URL 優先
+
+
+    RelatedCrawlService
+        負責：
+
+            Related URLs
+                ↓
+            Crawl
+                ↓
+            Parser
+                ↓
+            Article
+
+
     RawHTMLRepository
         負責：
 
             CrawlResult
                 ↓
             MongoDB Raw HTML
+
 
     ParserService
         負責：
@@ -175,6 +238,125 @@ Repository Save Failure：
             仍代表 HTTP Crawl 是否成功。
 
 
+Keyword Link Detection Policy：
+
+    HTML 成功取得後：
+
+        HTML
+          ↓
+        KeywordProcessor
+          ↓
+        Processed Keyword
+          ↓
+        KeywordLinkDetector
+          ↓
+        Related URLs
+          ↓
+        RelatedCrawlService
+
+
+    CrawlService：
+
+        不直接操作 SQL。
+
+        不直接實作 Related Crawl。
+
+        只負責：
+
+            Related URLs
+                ↓
+            RelatedCrawlService
+
+
+Related Crawl Policy：
+
+    Original Crawl 與 Related Crawl 是兩條流程。
+
+
+    Original Crawl：
+
+        原始 URL
+            ↓
+        Original HTML
+            ↓
+        Hash
+            ↓
+        Resources
+            ↓
+        CrawlResult
+            ↓
+        MongoDB
+            ↓
+        原本 Parser / Article 流程
+
+
+    Related Crawl：
+
+        Original HTML
+            ↓
+        KeywordProcessor
+            ↓
+        KeywordLinkDetector
+            ↓
+        SQL articles.url Priority
+            ↓
+        Related URLs
+            ↓
+        RelatedCrawlService
+            ↓
+        Crawl
+            ↓
+        Parser
+            ↓
+        Article
+
+
+    Related Crawl：
+
+        - 不取代 Original HTML
+        - 不取代 Original CrawlResult
+        - 不修改 Original CrawlResult
+        - 不回到 JobExecutorBridge
+        - 不重新進入 Original Crawl URL
+        - 完成後 Original CrawlService 繼續
+
+
+Circular Import Policy：
+
+    不使用：
+
+        from services.related_crawl_service import RelatedCrawlService
+
+    於檔案頂部。
+
+    原因：
+
+        related_crawl_service
+            ↓
+        ParserService
+            ↓
+        CrawlService
+
+    若 CrawlService 再於 module import 階段
+    import RelatedCrawlService，
+
+        CrawlService
+            ↓
+        RelatedCrawlService
+            ↓
+        ParserService
+            ↓
+        CrawlService
+
+    可能形成 Circular Import。
+
+    因此：
+
+        RelatedCrawlService
+            ↓
+        Runtime Lazy Import
+
+
 Pipeline：
 
     SearchResult
@@ -188,18 +370,43 @@ Pipeline：
     crawler.download()
           ↓
        Raw HTML
-          ↓
-    SHA-256 Hash
-          ↓
-    crawler.download_resources()
-          ↓
-    CSS / Images
-          ↓
-     CrawlResult
-          ↓
-    RawHTMLRepository
-          ↓
-       MongoDB
+          │
+          ├────────────────────────────┐
+          │                            │
+          ▼                            ▼
+    KeywordProcessor               SHA-256 Hash
+          │                            │
+          ▼                            ▼
+    Processed Keyword            Content Hash
+          │                            │
+          ▼                            │
+    KeywordLinkDetector                │
+          │                            │
+          │                            │
+          ▼                            │
+    SQL articles.url                   │
+          │                            │
+          ▼                            │
+   未存在 URL 優先                     │
+          │                            │
+          ▼                            │
+      Related URLs                     │
+          │                            │
+          ▼                            │
+  RelatedCrawlService                  │
+          │                            │
+      Crawl / Parser / Article         │
+                                       │
+                         Resource Download
+                                       │
+                                       ▼
+                                  CrawlResult
+                                       │
+                                       ▼
+                                RawHTMLRepository
+                                       │
+                                       ▼
+                                    MongoDB
 """
 
 
@@ -255,6 +462,28 @@ from database.raw_html_repository import (
 
 # ==================================================
 #
+# Keyword Processor
+#
+# ==================================================
+
+from utils.keyword_processor import (
+    KeywordProcessor,
+)
+
+
+# ==================================================
+#
+# Keyword Link Detector
+#
+# ==================================================
+
+from services.keyword_link_detector import (
+    KeywordLinkDetector,
+)
+
+
+# ==================================================
+#
 # Logger
 #
 # ==================================================
@@ -297,6 +526,7 @@ class CrawlResult:
             Article
             Duplicate Detection
             Archive Version
+            Related Crawl
     """
 
     # --------------------------------------------------
@@ -419,13 +649,9 @@ class CrawlResult:
 
             沒有 Resource
             不代表 Crawl Failure。
-
-        某些 HTML 本身可能沒有
-        CSS 或 Image。
         """
 
         if not self.resources:
-
             return False
 
         css = self.resources.get(
@@ -478,6 +704,12 @@ class CrawlService:
          ↓
         Raw HTML
          ↓
+        KeywordProcessor
+         ↓
+        KeywordLinkDetector
+         ↓
+        RelatedCrawlService
+         ↓
         SHA-256
          ↓
         Resources
@@ -488,6 +720,7 @@ class CrawlService:
          ↓
         MongoDB
 
+
     本 Service 不直接處理：
 
         SQL
@@ -495,11 +728,22 @@ class CrawlService:
         Article
         AI
         Archive Business Logic
+        RelatedCrawlService implementation
 
-    Crawl 階段：
 
-        article_id = None
-        document_id = None
+    Related Crawl：
+
+        RelatedCrawlService
+        由本 Service 在 Runtime
+        Lazy Import 後直接呼叫。
+
+
+    注意：
+
+        不在 Module Import 階段
+        直接 import RelatedCrawlService。
+
+        避免 Circular Import。
     """
 
     # ==================================================
@@ -515,6 +759,9 @@ class CrawlService:
         resource_downloader=None,
         raw_html_repository=None,
         save_raw_html=True,
+        keyword_processor=None,
+        keyword_link_detector=None,
+        related_crawl_service=None,
     ):
         """
         建立 CrawlService。
@@ -530,6 +777,7 @@ class CrawlService:
 
                 crawler.download
 
+
         url_resolver :
 
             Redirect URL Resolver。
@@ -537,6 +785,7 @@ class CrawlService:
             預設：
 
                 crawler.resolve_url
+
 
         resource_downloader :
 
@@ -546,6 +795,7 @@ class CrawlService:
 
                 crawler.download_resources
 
+
         raw_html_repository :
 
             Raw HTML Repository。
@@ -554,17 +804,57 @@ class CrawlService:
 
                 RawHTMLRepository()
 
+
         save_raw_html :
 
             是否在 Crawl 成功後
             將 Raw HTML 保存至 MongoDB。
 
             預設 True。
+
+
+        keyword_processor :
+
+            KeywordProcessor。
+
+            預設：
+
+                KeywordProcessor()
+
+
+        keyword_link_detector :
+
+            KeywordLinkDetector。
+
+            預設：
+
+                KeywordLinkDetector()
+
+
+        related_crawl_service :
+
+            RelatedCrawlService。
+
+            可由外部注入。
+
+            若未提供：
+
+                在 _handle_related_urls()
+                執行 Runtime Lazy Import。
+
+            必須提供：
+
+                process_many(
+                    related_urls,
+                    keyword,
+                )
         """
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Downloader
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if downloader is None:
 
@@ -582,9 +872,11 @@ class CrawlService:
             downloader
         )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # URL Resolver
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if url_resolver is None:
 
@@ -602,9 +894,11 @@ class CrawlService:
             url_resolver
         )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Resource Downloader
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if resource_downloader is None:
 
@@ -625,9 +919,11 @@ class CrawlService:
             resource_downloader
         )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Raw HTML Repository
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if raw_html_repository is None:
 
@@ -639,13 +935,385 @@ class CrawlService:
             raw_html_repository
         )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Save Raw HTML
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         self.save_raw_html = bool(
             save_raw_html
         )
+
+        # ==================================================
+        #
+        # Keyword Processor
+        #
+        # ==================================================
+
+        if keyword_processor is None:
+
+            keyword_processor = (
+                KeywordProcessor()
+            )
+
+        if not hasattr(
+            keyword_processor,
+            "process",
+        ):
+
+            raise TypeError(
+                "keyword_processor "
+                "must provide process()"
+            )
+
+        self.keyword_processor = (
+            keyword_processor
+        )
+
+        # ==================================================
+        #
+        # Keyword Link Detector
+        #
+        # ==================================================
+
+        if keyword_link_detector is None:
+
+            keyword_link_detector = (
+                KeywordLinkDetector()
+            )
+
+        if not hasattr(
+            keyword_link_detector,
+            "detect",
+        ):
+
+            raise TypeError(
+                "keyword_link_detector "
+                "must provide detect()"
+            )
+
+        self.keyword_link_detector = (
+            keyword_link_detector
+        )
+
+        # ==================================================
+        #
+        # Related Crawl Service
+        #
+        # ==================================================
+
+        if (
+            related_crawl_service
+            is not None
+        ):
+
+            if not hasattr(
+                related_crawl_service,
+                "process_many",
+            ):
+
+                raise TypeError(
+                    "related_crawl_service "
+                    "must provide "
+                    "process_many()"
+                )
+
+        self.related_crawl_service = (
+            related_crawl_service
+        )
+
+    # ==================================================
+    #
+    # Detect Related URLs
+    #
+    # ==================================================
+
+    def detect_related_urls(
+        self,
+        html,
+        keyword,
+        target_language=None,
+        base_url=None,
+    ):
+        """
+        使用現有 KeywordProcessor
+        與 KeywordLinkDetector
+        找出 Related URLs。
+
+        Pipeline：
+
+            HTML
+              ↓
+            KeywordProcessor
+              ↓
+            Processed Keyword
+              ↓
+            KeywordLinkDetector
+              ↓
+            Related URLs
+
+        注意：
+
+            KeywordLinkDetector
+            自己負責 SQL：
+
+                articles.url
+
+            未存在 URL 優先。
+        """
+
+        # --------------------------------------------------
+        # Validate HTML
+        # --------------------------------------------------
+
+        if not isinstance(
+            html,
+            str,
+        ):
+
+            return []
+
+        if not html.strip():
+
+            return []
+
+        # --------------------------------------------------
+        # Validate Keyword
+        # --------------------------------------------------
+
+        if keyword is None:
+
+            return []
+
+        keyword = str(
+            keyword
+        ).strip()
+
+        if not keyword:
+
+            return []
+
+        # --------------------------------------------------
+        # Process Keyword
+        # --------------------------------------------------
+
+        try:
+
+            processed_keyword = (
+                self.keyword_processor.process(
+
+                    keyword,
+
+                    target_language,
+
+                )
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Keyword processing failed: "
+                f"keyword={keyword}, "
+                f"error={exc}"
+            )
+
+            return []
+
+        # --------------------------------------------------
+        # Validate Processed Keyword
+        # --------------------------------------------------
+
+        if not isinstance(
+            processed_keyword,
+            dict,
+        ):
+
+            logger.warning(
+                "KeywordProcessor returned "
+                "invalid result type: "
+                f"type="
+                f"{type(processed_keyword).__name__}"
+            )
+
+            return []
+
+        # --------------------------------------------------
+        # Detect Related URLs
+        # --------------------------------------------------
+
+        try:
+
+            related_urls = (
+                self.keyword_link_detector.detect(
+
+                    html,
+
+                    processed_keyword,
+
+                    base_url=(
+
+                        base_url
+
+                    ),
+
+                )
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Keyword link detection failed: "
+                f"keyword={keyword}, "
+                f"base_url={base_url}, "
+                f"error={exc}"
+            )
+
+            return []
+
+        # --------------------------------------------------
+        # Validate Detector Result
+        # --------------------------------------------------
+
+        if related_urls is None:
+
+            return []
+
+        if not isinstance(
+            related_urls,
+            list,
+        ):
+
+            logger.warning(
+                "Keyword link detector returned "
+                "invalid result type: "
+                f"type={type(related_urls).__name__}"
+            )
+
+            return []
+
+        return related_urls
+
+    # ==================================================
+    #
+    # Handle Related URLs
+    #
+    # ==================================================
+
+    def _handle_related_urls(
+        self,
+        related_urls,
+        keyword,
+    ):
+        """
+        將 Related URLs
+        傳給 RelatedCrawlService。
+
+        Pipeline：
+
+            Related URLs
+                 ↓
+            RelatedCrawlService
+                 ↓
+               Crawl
+                 ↓
+               Parser
+                 ↓
+              Article
+
+
+        Related Crawl 是 Original Crawl
+        的獨立 Side Branch。
+
+        不修改：
+
+            Original HTML
+            Original CrawlResult
+            Original Crawl flow
+
+        不回到：
+
+            JobExecutorBridge
+        """
+
+        if not related_urls:
+
+            return None
+
+        try:
+
+            # ==================================================
+            #
+            # RelatedCrawlService
+            #
+            # 優先使用外部注入的 Service。
+            #
+            # ==================================================
+
+            related_crawl_service = (
+                self.related_crawl_service
+            )
+
+            # ==================================================
+            #
+            # Runtime Lazy Import
+            #
+            # ==================================================
+
+            if (
+                related_crawl_service
+                is None
+            ):
+
+                from services.related_crawl_service import (
+                    RelatedCrawlService,
+                )
+
+                related_crawl_service = (
+                    RelatedCrawlService()
+                )
+
+            # ==================================================
+            #
+            # Process Related URLs
+            #
+            # ==================================================
+
+            result = (
+                related_crawl_service.process_many(
+
+                    related_urls,
+
+                    keyword,
+
+                )
+            )
+
+            logger.info(
+                "Related Crawl completed: "
+                f"keyword={keyword}, "
+                f"related_urls={len(related_urls)}"
+            )
+
+            return result
+
+        except Exception as exc:
+
+            logger.exception(
+                "Related Crawl failed: "
+                f"keyword={keyword}, "
+                f"related_urls={len(related_urls)}, "
+                f"error={exc}"
+            )
+
+            # --------------------------------------------------
+            # IMPORTANT
+            #
+            # Related Crawl Failure
+            # 不影響 Original Crawl。
+            # --------------------------------------------------
+
+            return None
 
     # ==================================================
     #
@@ -656,6 +1324,8 @@ class CrawlService:
     def crawl(
         self,
         url,
+        keyword=None,
+        target_language=None,
     ):
         """
         Crawl 單一 URL。
@@ -671,33 +1341,36 @@ class CrawlService:
             download()
              ↓
             Raw HTML
-             ↓
-            SHA-256
-             ↓
-            download_resources()
-             ↓
-            CrawlResult
-             ↓
-            RawHTMLRepository
-             ↓
-            MongoDB
-
-        Parameters
-        ----------
-
-        url : str
-
-            目標網頁 URL。
-
-        Returns
-        -------
-
-        CrawlResult
+             │
+             ├───────────────────────┐
+             │                       │
+             ▼                       ▼
+        KeywordProcessor         SHA-256
+             ↓                       ↓
+        Processed Keyword       Content Hash
+             ↓                       │
+        KeywordLinkDetector          │
+             ↓                       │
+        Related URLs                 │
+             ↓                       │
+        RelatedCrawlService          │
+             ↓                       │
+        Crawl / Parser / Article     │
+                                     │
+                          Resource Download
+                                     ↓
+                                CrawlResult
+                                     ↓
+                              RawHTMLRepository
+                                     ↓
+                                  MongoDB
         """
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Validate URL
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         try:
 
@@ -738,9 +1411,11 @@ class CrawlService:
 
             )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Resolve URL
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         resolved_url = (
             normalized_url
@@ -762,9 +1437,6 @@ class CrawlService:
 
         except Exception as exc:
 
-            # URL Resolution 失敗時，
-            # 保留原始 URL。
-
             resolved_url = (
                 normalized_url
             )
@@ -775,9 +1447,11 @@ class CrawlService:
                 f"error={exc}"
             )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Download HTML
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         try:
 
@@ -822,9 +1496,11 @@ class CrawlService:
 
             )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Download Failed
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if html is None:
 
@@ -860,9 +1536,11 @@ class CrawlService:
 
             )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Validate HTML
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if not isinstance(
             html,
@@ -903,9 +1581,11 @@ class CrawlService:
 
             )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Empty HTML
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         if not html.strip():
 
@@ -940,6 +1620,64 @@ class CrawlService:
                 ),
 
             )
+
+        # ==================================================
+        #
+        # Keyword Link Detection
+        #
+        # ==================================================
+
+        if keyword:
+
+            related_urls = (
+                self.detect_related_urls(
+
+                    html=html,
+
+                    keyword=keyword,
+
+                    target_language=target_language,
+
+                    base_url=(
+
+                        resolved_url
+                        or normalized_url
+
+                    ),
+
+                )
+            )
+
+            if related_urls:
+
+                logger.info(
+                    "Related URLs detected: "
+                    f"url={normalized_url}, "
+                    f"keyword={keyword}, "
+                    f"count={len(related_urls)}"
+                )
+
+                self._handle_related_urls(
+
+                    related_urls,
+
+                    keyword,
+
+                )
+
+            else:
+
+                logger.info(
+                    "No related URLs detected: "
+                    f"url={normalized_url}, "
+                    f"keyword={keyword}"
+                )
+
+        # ==================================================
+        #
+        # Original Crawl Flow Continues
+        #
+        # ==================================================
 
         # --------------------------------------------------
         # Generate Content Hash
@@ -988,21 +1726,11 @@ class CrawlService:
 
             )
 
-        # --------------------------------------------------
-        # Download Resources
+        # ==================================================
         #
-        # Resource Download Failure
-        # 不應該讓 HTML Crawl Failure。
+        # Resource Download
         #
-        # HTML 已成功：
-        #
-        #     success=True
-        #
-        # 即使：
-        #
-        #     CSS = []
-        #     Images = []
-        # --------------------------------------------------
+        # ==================================================
 
         resources = {
             "css": [],
@@ -1065,13 +1793,6 @@ class CrawlService:
 
         except Exception as exc:
 
-            # --------------------------------------------------
-            # IMPORTANT
-            #
-            # Resource Failure
-            # 不等於 HTML Crawl Failure。
-            # --------------------------------------------------
-
             logger.exception(
                 "Resource download failed: "
                 f"url={normalized_url}, "
@@ -1083,9 +1804,11 @@ class CrawlService:
                 "images": [],
             }
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Create Crawl Result
-        # --------------------------------------------------
+        #
+        # ==================================================
 
         result = CrawlResult(
 
@@ -1111,18 +1834,11 @@ class CrawlService:
 
         )
 
-        # --------------------------------------------------
+        # ==================================================
+        #
         # Save Raw HTML
         #
-        # Crawl 階段：
-        #
-        #     article_id=None
-        #     document_id=None
-        #
-        # 後續 Article 建立後，
-        # 再由 Repository.update_metadata()
-        # 補回。
-        # --------------------------------------------------
+        # ==================================================
 
         if self.save_raw_html:
 
@@ -1184,40 +1900,18 @@ class CrawlService:
         """
         將成功 CrawlResult
         保存至 RawHTMLRepository。
-
-        Pipeline：
-
-            CrawlResult
-                 ↓
-            save_crawl_result()
-                 ↓
-              MongoDB
-
-        Crawl 階段：
-
-            article_id=None
-            document_id=None
-
-        同時保存：
-
-            resources.css[]
-            resources.images[]
         """
 
         if crawl_result is None:
-
             return None
 
         if not crawl_result.success:
-
             return None
 
         if not crawl_result.html:
-
             return None
 
         if not crawl_result.content_hash:
-
             return None
 
         if self.raw_html_repository is None:
@@ -1234,9 +1928,11 @@ class CrawlService:
 
         try:
 
-            # --------------------------------------------------
+            # ==================================================
+            #
             # Preferred API
-            # --------------------------------------------------
+            #
+            # ==================================================
 
             save_crawl_result_method = getattr(
 
@@ -1277,9 +1973,11 @@ class CrawlService:
 
                 return mongo_id
 
-            # --------------------------------------------------
+            # ==================================================
+            #
             # Compatibility API
-            # --------------------------------------------------
+            #
+            # ==================================================
 
             save_raw_html_method = getattr(
 
@@ -1301,9 +1999,11 @@ class CrawlService:
                     )
                 )
 
-            # --------------------------------------------------
+            # ==================================================
+            #
             # Generic save() Compatibility
-            # --------------------------------------------------
+            #
+            # ==================================================
 
             save_method = getattr(
 
@@ -1357,10 +2057,6 @@ class CrawlService:
 
                 except TypeError:
 
-                    # Compatibility：
-                    # 部分 Repository 可能接受
-                    # CrawlResult 作為單一參數。
-
                     return (
                         save_method(
                             crawl_result
@@ -1368,23 +2064,12 @@ class CrawlService:
                     )
 
             raise TypeError(
-
                 "raw_html_repository must provide "
-
                 "save_crawl_result(), "
-
                 "save_raw_html(), or save()"
-
             )
 
         except Exception as exc:
-
-            # --------------------------------------------------
-            # IMPORTANT
-            #
-            # MongoDB Save Failure
-            # 不等於 HTTP Crawl Failure。
-            # --------------------------------------------------
 
             logger.exception(
                 "Raw HTML MongoDB save failed: "
@@ -1403,10 +2088,25 @@ class CrawlService:
     def crawl_result(
         self,
         search_result,
+        keyword=None,
+        target_language=None,
     ):
         """
-        從 SearchResult 取得 URL
-        後進行 Crawl。
+        從 SearchResult 取得 URL 後進行 Crawl。
+
+        keyword：
+
+            優先使用明確傳入的 keyword。
+
+            若沒有，
+            嘗試從 search_result.keyword 取得。
+
+        target_language：
+
+            優先使用明確傳入的 target_language。
+
+            若沒有，
+            嘗試從 search_result.target_language 取得。
         """
 
         if search_result is None:
@@ -1428,8 +2128,30 @@ class CrawlService:
                 "provide url"
             )
 
+        if keyword is None:
+
+            keyword = getattr(
+                search_result,
+                "keyword",
+                None,
+            )
+
+        if target_language is None:
+
+            target_language = getattr(
+                search_result,
+                "target_language",
+                None,
+            )
+
         return self.crawl(
-            url
+
+            url,
+
+            keyword=keyword,
+
+            target_language=target_language,
+
         )
 
     # ==================================================
@@ -1441,13 +2163,11 @@ class CrawlService:
     def crawl_target(
         self,
         target,
+        keyword=None,
+        target_language=None,
     ):
         """
         Direct URL Target Crawl。
-
-        只需要：
-
-            target.url
         """
 
         if target is None:
@@ -1468,8 +2188,30 @@ class CrawlService:
                 "target must provide url"
             )
 
+        if keyword is None:
+
+            keyword = getattr(
+                target,
+                "keyword",
+                None,
+            )
+
+        if target_language is None:
+
+            target_language = getattr(
+                target,
+                "target_language",
+                None,
+            )
+
         return self.crawl(
-            url
+
+            url,
+
+            keyword=keyword,
+
+            target_language=target_language,
+
         )
 
     # ==================================================
@@ -1481,16 +2223,11 @@ class CrawlService:
     def crawl_many(
         self,
         urls,
+        keyword=None,
+        target_language=None,
     ):
         """
         Crawl 多個 URL。
-
-        不負責：
-
-            URL Deduplication
-            Search
-            SQL
-            Job
         """
 
         if urls is None:
@@ -1504,7 +2241,13 @@ class CrawlService:
             try:
 
                 result = self.crawl(
-                    url
+
+                    url,
+
+                    keyword=keyword,
+
+                    target_language=target_language,
+
                 )
 
             except Exception as exc:
@@ -1553,6 +2296,8 @@ class CrawlService:
     def crawl_search_results(
         self,
         search_results,
+        keyword=None,
+        target_language=None,
     ):
         """
         Crawl 一批 SearchResult。
@@ -1565,15 +2310,21 @@ class CrawlService:
                     ↓
               CrawlResult[]
                     │
+                    ├──→ KeywordProcessor
+                    │          ↓
+                    │   KeywordLinkDetector
+                    │          ↓
+                    │      SQL articles.url
+                    │          ↓
+                    │   Related URLs
+                    │          ↓
+                    │   RelatedCrawlService
+                    │
                     ├──→ RawHTMLRepository
                     │          ↓
                     │       MongoDB
                     │
                     └──→ ParserService
-
-        每一個成功的 CrawlResult
-        都會在 crawl() 階段
-        自動保存至 MongoDB。
         """
 
         if search_results is None:
@@ -1588,7 +2339,13 @@ class CrawlService:
 
                 result = (
                     self.crawl_result(
-                        search_result
+
+                        search_result,
+
+                        keyword=keyword,
+
+                        target_language=target_language,
+
                     )
                 )
 
@@ -1657,13 +2414,6 @@ class CrawlService:
             1. None Validation
             2. str Conversion
             3. strip()
-
-        不負責：
-
-            URL Deduplication
-            URL Canonicalization
-            URL Parsing
-            URL Validation Service
         """
 
         if url is None:
@@ -1723,9 +2473,6 @@ class CrawlService:
     ):
         """
         從 CrawlResult 取得 Raw HTML。
-
-        只有成功 Crawl
-        才允許取得 HTML。
         """
 
         if not isinstance(
@@ -1764,9 +2511,6 @@ class CrawlService:
     ):
         """
         從 CrawlResult 取得 Content Hash。
-
-        只有成功 Crawl
-        才允許取得 Hash。
         """
 
         if not isinstance(
@@ -1863,29 +2607,43 @@ default_crawl_service = (
 
 def crawl(
     url,
+    keyword=None,
+    target_language=None,
 ):
     """
     使用預設 CrawlService
     Crawl 單一 URL。
 
-    Crawl 成功後：
+    Keyword 若存在：
 
         Raw HTML
-            +
-        Resources
             ↓
-        MongoDB
+        KeywordProcessor
+            ↓
+        KeywordLinkDetector
+            ↓
+        RelatedCrawlService
+            ↓
+        原本 Crawl 流程
     """
 
     return (
         default_crawl_service.crawl(
-            url
+
+            url,
+
+            keyword=keyword,
+
+            target_language=target_language,
+
         )
     )
 
 
 def crawl_search_result(
     search_result,
+    keyword=None,
+    target_language=None,
 ):
     """
     使用預設 CrawlService
@@ -1895,13 +2653,21 @@ def crawl_search_result(
     return (
         default_crawl_service
         .crawl_result(
-            search_result
+
+            search_result,
+
+            keyword=keyword,
+
+            target_language=target_language,
+
         )
     )
 
 
 def crawl_target(
     target,
+    keyword=None,
+    target_language=None,
 ):
     """
     使用預設 CrawlService
@@ -1911,7 +2677,13 @@ def crawl_target(
     return (
         default_crawl_service
         .crawl_target(
-            target
+
+            target,
+
+            keyword=keyword,
+
+            target_language=target_language,
+
         )
     )
 

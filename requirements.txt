@@ -85,3 +85,6 @@ langchain-community
 chromadb
 sentence-transformers
 
+
+
+playwright
